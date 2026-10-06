@@ -5,12 +5,12 @@ Pyckets es un gestor de tareas ágil, ligero y portátil diseñado para acoplars
 ## 🏗️ Fase 1: Configuración y Modelado de Datos
 El objetivo es establecer los cimientos de la base de datos y definir las entidades principales del sistema.
 
-- [ ] **Inicializar el entorno:** Crear el entorno virtual (`venv`) y el archivo `requirements.txt` con `fastapi`, `uvicorn` y `sqlmodel`.
-- [ ] **Definir los Modelos (SQLModel):** Crear el archivo `models.py` con las tablas principales:
+- [x] **Inicializar el entorno:** Crear el entorno virtual (`venv`) y el archivo `requirements.txt` con `fastapi`, `uvicorn` y `sqlmodel`.
+- [x] **Definir los Modelos (SQLModel):** Crear el archivo `models.py` con las tablas principales:
   - `Ticket`: id, title, description, status, epic_id, tags (JSON/String), release.
   - `Epic`: id, name, color.
   - `Column`: id, name, order (para configurar el tablero dinámicamente).
-- [ ] **Motor de Base de Datos:** Crear `database.py` con la lógica para inicializar la conexión (`sqlite:///pyckets.db`) y generar las tablas si no existen.
+- [x] **Motor de Base de Datos:** Crear `database.py` con la lógica para inicializar la conexión (`sqlite:///pyckets.db`) y generar las tablas si no existen.
 
 ## ⚙️ Fase 2: Desarrollo de la API REST (Backend)
 Construir los endpoints necesarios para que el frontend pueda leer y modificar el estado del proyecto sin recargar la página.
