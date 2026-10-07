@@ -1,9 +1,12 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select
 from pydantic import BaseModel
 from typing import List, Optional
+import os
 
 # Importamos lo que creamos en la Fase 1
 from models import Ticket, Epic, Column
@@ -16,6 +19,14 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(title="Pyckets API", lifespan=lifespan)
+
+# Montamos la carpeta "static" en la ruta "/static"
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Cuando el usuario entre a la raíz ("/") le servimos el index.html
+@app.get("/")
+def read_index():
+    return FileResponse(os.path.join("static", "index.html"))
 
 # Configuración CORS: Crucial para que el frontend (HTML/JS) pueda pedir datos sin bloqueos
 app.add_middleware(

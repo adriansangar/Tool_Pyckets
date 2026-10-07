@@ -27,10 +27,10 @@ Construir los endpoints necesarios para que el frontend pueda leer y modificar e
 ## 🎨 Fase 3: Interfaz de Usuario (Frontend Estático)
 Desarrollar una *Single Page Application* (SPA) sencilla usando HTML, CSS y Vanilla JavaScript (o un framework muy ligero).
 
-- [ ] **Estructura Base (`index.html`):** Crear el layout principal con un header (para los filtros) y un contenedor central dinámico.
-- [ ] **Lógica de Conexión (`app.js`):** Implementar las funciones `fetch()` para consumir los endpoints de lectura del backend al cargar la página.
-- [ ] **Vista Kanban:** Renderizar dinámicamente las columnas y ubicar cada ticket en su columna correspondiente según su estado.
-- [ ] **Funcionalidad Drag & Drop:** Implementar la lógica para arrastrar tarjetas entre columnas y disparar el `PUT /api/tickets/{id}/status`.
+- [x] **Estructura Base (`index.html`):** Crear el layout principal con un header (para los filtros) y un contenedor central dinámico.
+- [x] **Lógica de Conexión (`app.js`):** Implementar las funciones `fetch()` para consumir los endpoints de lectura del backend al cargar la página.
+- [x] **Vista Kanban:** Renderizar dinámicamente las columnas y ubicar cada ticket en su columna correspondiente según su estado.
+- [x] **Funcionalidad Drag & Drop:** Implementar la lógica para arrastrar tarjetas entre columnas y disparar el `PUT /api/tickets/{id}/status`.
 - [ ] **Vista de Lista:** Crear un botón que alterne el renderizado del contenedor central hacia una tabla de datos clásica.
 
 ## 🚀 Fase 4: Empaquetado y Despliegue Agnóstico

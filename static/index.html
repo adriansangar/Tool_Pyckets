@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pyckets</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <header>
+        <h1>🚀 Pyckets</h1>
+        <div class="controls">
+            <!-- Espacio preparado para futuros filtros de Epics/Tags -->
+            <button id="toggle-view" class="btn">Vista Lista</button>
+            <button id="new-ticket" class="btn primary">Nuevo Ticket</button>
+        </div>
+    </header>
+    
+    <main id="board-container">
+        <!-- Las columnas Kanban se inyectarán aquí dinámicamente con JavaScript -->
+    </main>
+
+    <!-- Modal para Nuevo Ticket -->
+    <div id="ticket-modal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h2>Crear Nuevo Ticket</h2>
+            <form id="new-ticket-form">
+                <div class="form-group">
+                    <label>Título del ticket *</label>
+                    <input type="text" id="ticket-title" required autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label>Descripción</label>
+                    <textarea id="ticket-desc" rows="3"></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn" id="cancel-ticket">Cancelar</button>
+                    <button type="submit" class="btn primary">Guardar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <script src="/static/app.js"></script>
+</body>
+</html>
