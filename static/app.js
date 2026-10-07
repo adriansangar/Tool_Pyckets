@@ -1,10 +1,14 @@
 const API_BASE = "/api";
 const boardContainer = document.getElementById("board-container");
+const listContainer = document.getElementById("list-container");
+const ticketListBody = document.getElementById("ticket-list-body");
+const btnToggleView = document.getElementById("toggle-view");
 
-// Función principal que orquesta la carga de datos
+let isListView = false;
+
+// --- INIT: Carga inicial de datos ---
 async function initBoard() {
     try {
-        // Lanzamos ambas peticiones en paralelo para ahorrar tiempo
         const [columnsRes, ticketsRes] = await Promise.all([
             fetch(`${API_BASE}/columns`),
             fetch(`${API_BASE}/tickets`)
@@ -15,21 +19,34 @@ async function initBoard() {
 
         renderColumns(columns);
         renderTickets(tickets);
+        // Le pasamos 'true' para forzar que limpie la tabla antes de inyectar
+        renderTableTickets(tickets, true); 
+        
+        setupDragAndDrop();
     } catch (error) {
         console.error("Error crítico cargando el tablero:", error);
-        boardContainer.innerHTML = "<p>Error al conectar con la base de datos.</p>";
     }
 }
 
-// Genera la estructura de las columnas en el DOM
+// --- TOGGLE: Alternar Vistas ---
+btnToggleView.addEventListener("click", () => {
+    isListView = !isListView;
+    if (isListView) {
+        boardContainer.style.display = "none";
+        listContainer.style.display = "block";
+        btnToggleView.textContent = "Vista Kanban";
+    } else {
+        boardContainer.style.display = "flex";
+        listContainer.style.display = "none";
+        btnToggleView.textContent = "Vista Lista";
+    }
+});
+
+// --- RENDER KANBAN ---
 function renderColumns(columns) {
     boardContainer.innerHTML = ""; 
-
     columns.forEach(col => {
-        // Normalizamos el nombre (ej. "To Do" -> "todo", "In Progress" -> "in_progress")
-        // Esto servirá como enlace entre la columna y el estado del ticket
         const statusId = col.name.toLowerCase().replace(/\s+/g, '_').replace('to_do', 'todo');
-
         const colDiv = document.createElement("div");
         colDiv.className = "kanban-column";
         colDiv.innerHTML = `
@@ -40,197 +57,163 @@ function renderColumns(columns) {
     });
 }
 
-// Inserta cada ticket en su columna correspondiente
 function renderTickets(tickets) {
     tickets.forEach(ticket => {
-        // Buscamos el contenedor interno de la columna que coincide con el status del ticket
         const colContent = document.querySelector(`.column-content[data-status="${ticket.status}"]`);
-        
         if (colContent) {
             const ticketDiv = document.createElement("div");
             ticketDiv.className = "ticket-card";
-            ticketDiv.draggable = true; // Propiedad HTML5 nativa clave para el siguiente paso
-            ticketDiv.dataset.id = ticket.id; // Guardamos la ID de BD en el HTML
+            ticketDiv.draggable = true;
+            ticketDiv.dataset.id = ticket.id;
             
-            // Construimos el interior de la tarjeta
             ticketDiv.innerHTML = `
-                <div class="ticket-title">${ticket.title}</div>${ticket.description ? `<div style="font-size: 0.8rem; color: #5e6c84; margin-bottom: 8px;">${ticket.description}</div>` : ""}
-                <div style="font-size: 0.75rem; color: #0052cc; font-weight: bold;">
-                    ${ticket.tags && ticket.tags.length > 0 ? ticket.tags.map(tag => `#${tag}`).join(" ") : ""}
+                <div class="ticket-title">${ticket.title}</div>
+                ${ticket.description ? `<div class="ticket-desc">${ticket.description}</div>` : ""}
+                <div class="tags-container">
+                    ${ticket.tags && ticket.tags.length > 0 ? ticket.tags.map(tag => `<span class="tag-badge">${tag}</span>`).join("") : ""}
                 </div>
             `;
-            
             colContent.appendChild(ticketDiv);
         }
     });
 }
 
-// Arrancar la maquinaria cuando el navegador termine de leer el HTML
-document.addEventListener("DOMContentLoaded", initBoard);
+// --- RENDER LISTA ---
+function renderTableTickets(tickets, clearTable = false) {
+    // Ahora el borrado es explícito y seguro
+    if (clearTable) ticketListBody.innerHTML = ""; 
 
-// --- LÓGICA DE DRAG & DROP ---
+    tickets.forEach(ticket => {
+        const tr = document.createElement("tr");
+        const statusName = (ticket.status || "todo").replace("_", " "); 
+        
+        tr.innerHTML = `
+            <td style="color: var(--text-muted); font-size: 0.85rem;">TB-${ticket.id}</td>
+            <td style="font-weight: 500; font-size: 0.95rem;">${ticket.title}</td>
+            <td><span class="status-badge">${statusName}</span></td>
+            <td>
+                <div class="tags-container" style="margin-top: 0;">
+                    ${ticket.tags && ticket.tags.length > 0 
+                        ? ticket.tags.map(tag => `<span class="tag-badge">${tag}</span>`).join("") 
+                        : "<span style='color: #a5adba; font-size: 0.8rem;'>Sin etiquetas</span>"}
+                </div>
+            </td>
+        `;
+        ticketListBody.appendChild(tr);
+    });
+}
 
+// --- DRAG & DROP ---
 let draggedTicket = null;
 
 function setupDragAndDrop() {
     const tickets = document.querySelectorAll('.ticket-card');
     const columns = document.querySelectorAll('.column-content');
 
-    // 1. Eventos para las tarjetas que se arrastran
     tickets.forEach(ticket => {
-        ticket.addEventListener('dragstart', (e) => {
+        ticket.addEventListener('dragstart', () => {
             draggedTicket = ticket;
-            // Un pequeño efecto visual para indicar que se está moviendo
             setTimeout(() => ticket.style.opacity = '0.5', 0); 
         });
-
         ticket.addEventListener('dragend', () => {
-            // Restaurar estilo al soltar (ya sea con éxito o si se cancela)
             if (draggedTicket) draggedTicket.style.opacity = '1';
             draggedTicket = null;
         });
     });
 
-    // 2. Eventos para las zonas donde se pueden soltar (Columnas)
     columns.forEach(column => {
-        // Necesario para que el navegador permita el drop
-        column.addEventListener('dragover', (e) => {
-            e.preventDefault(); 
-        });
-
-        // Efecto visual al pasar por encima de una columna válida
+        column.addEventListener('dragover', (e) => e.preventDefault());
         column.addEventListener('dragenter', (e) => {
             e.preventDefault();
             column.style.backgroundColor = '#e2e4e9'; 
         });
-
         column.addEventListener('dragleave', () => {
             column.style.backgroundColor = ''; 
         });
-
-        // 3. El evento clave: Soltar la tarjeta
         column.addEventListener('drop', async (e) => {
             e.preventDefault();
-            column.style.backgroundColor = ''; // Limpiamos el color hover
-
+            column.style.backgroundColor = ''; 
             if (draggedTicket) {
-                // Comprobamos si realmente cambió de columna para no saturar la API
                 const oldColumn = draggedTicket.closest('.column-content');
                 if (oldColumn === column) return;
-
-                // Movemos el elemento en el DOM instantáneamente (Optimistic UI)
+                
                 column.appendChild(draggedTicket);
-
                 const ticketId = draggedTicket.dataset.id;
                 const newStatus = column.dataset.status;
-
-                // Lanzamos la actualización a la base de datos
+                
                 await updateTicketStatus(ticketId, newStatus);
             }
         });
     });
 }
 
-// Llama al endpoint ultraligero que creamos en FastAPI
 async function updateTicketStatus(ticketId, status) {
     try {
-        const response = await fetch(`${API_BASE}/tickets/${ticketId}/status`, {
+        await fetch(`${API_BASE}/tickets/${ticketId}/status`, {
             method: 'PUT',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: status })
         });
-
-        if (!response.ok) {
-            console.error(`Error de servidor: ${response.status}`);
-            // En un caso real, aquí devolveríamos el ticket a su columna original
-        }
+        // Si recargas la página tras moverlo, también se actualizará en la tabla
     } catch (error) {
-        console.error("Error de red al actualizar el ticket:", error);
+        console.error("Error:", error);
     }
 }
 
-async function initBoard() {
-    try {
-        const [columnsRes, ticketsRes] = await Promise.all([
-            fetch(`${API_BASE}/columns`),
-            fetch(`${API_BASE}/tickets`)
-        ]);
-
-        const columns = await columnsRes.json();
-        const tickets = await ticketsRes.json();
-
-        renderColumns(columns);
-        renderTickets(tickets);
-        
-        // Inicializamos los eventos una vez que el DOM está construido
-        setupDragAndDrop();
-        
-    } catch (error) {
-        console.error("Error crítico cargando el tablero:", error);
-        boardContainer.innerHTML = "<p>Error al conectar con la base de datos.</p>";
-    }
-}
-
-// --- LÓGICA DE CREACIÓN DE TICKETS ---
-
+// --- MODAL DE CREACIÓN ---
 const modal = document.getElementById("ticket-modal");
 const btnNewTicket = document.getElementById("new-ticket");
 const btnCancel = document.getElementById("cancel-ticket");
 const formNewTicket = document.getElementById("new-ticket-form");
 
-// Abrir el modal
-btnNewTicket.addEventListener("click", () => {
-    modal.style.display = "flex";
-    document.getElementById("ticket-title").focus(); // Autoselecciona el input
-});
+if (btnNewTicket) {
+    btnNewTicket.addEventListener("click", () => {
+        modal.style.display = "flex";
+        document.getElementById("ticket-title").focus(); 
+    });
 
-// Cerrar el modal
-const closeModal = () => {
-    modal.style.display = "none";
-    formNewTicket.reset(); // Limpiamos el formulario
-};
-
-btnCancel.addEventListener("click", closeModal);
-
-// Cerrar haciendo clic fuera de la ventana blanca
-modal.addEventListener("click", (e) => {
-    if (e.target === modal) closeModal();
-});
-
-// Enviar los datos al Backend
-formNewTicket.addEventListener("submit", async (e) => {
-    e.preventDefault(); // Evitamos que la página se recargue
-
-    const newTicketData = {
-        title: document.getElementById("ticket-title").value,
-        description: document.getElementById("ticket-desc").value,
-        status: "todo", // Por defecto caen en la primera columna
-        tags: [] // Lo dejamos vacío de momento en el MVP
+    const closeModal = () => {
+        modal.style.display = "none";
+        formNewTicket.reset(); 
     };
 
-    try {
-        const response = await fetch(`${API_BASE}/tickets`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(newTicketData)
-        });
+    btnCancel.addEventListener("click", closeModal);
+    modal.addEventListener("click", (e) => {
+        if (e.target === modal) closeModal();
+    });
 
-        if (response.ok) {
-            const savedTicket = await response.json();
-            
-            // Reutilizamos la función que ya tenemos, pasándole un array con el nuevo ticket
-            renderTickets([savedTicket]); 
-            
-            // OJO: Hay que volver a atar los eventos de Drag & Drop para el nuevo ticket
-            setupDragAndDrop(); 
-            
-            closeModal();
-        } else {
-            console.error("Error al crear el ticket");
+    formNewTicket.addEventListener("submit", async (e) => {
+        e.preventDefault(); 
+        const newTicketData = {
+            title: document.getElementById("ticket-title").value,
+            description: document.getElementById("ticket-desc").value,
+            status: "todo", 
+            tags: [] 
+        };
+
+        try {
+            const response = await fetch(`${API_BASE}/tickets`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newTicketData)
+            });
+
+            if (response.ok) {
+                const savedTicket = await response.json();
+                
+                // Actualizamos ambas vistas pasándole el nuevo ticket
+                renderTickets([savedTicket]); 
+                // Le pasamos 'false' para que NO limpie la tabla, solo lo añada al final
+                renderTableTickets([savedTicket], false); 
+                
+                setupDragAndDrop(); 
+                closeModal();
+            }
+        } catch (error) {
+            console.error("Error:", error);
         }
-    } catch (error) {
-        console.error("Error de red:", error);
-    }
-});
+    });
+}
+
+// Disparador inicial
+document.addEventListener("DOMContentLoaded", initBoard);

@@ -31,7 +31,7 @@ Desarrollar una *Single Page Application* (SPA) sencilla usando HTML, CSS y Vani
 - [x] **Lógica de Conexión (`app.js`):** Implementar las funciones `fetch()` para consumir los endpoints de lectura del backend al cargar la página.
 - [x] **Vista Kanban:** Renderizar dinámicamente las columnas y ubicar cada ticket en su columna correspondiente según su estado.
 - [x] **Funcionalidad Drag & Drop:** Implementar la lógica para arrastrar tarjetas entre columnas y disparar el `PUT /api/tickets/{id}/status`.
-- [ ] **Vista de Lista:** Crear un botón que alterne el renderizado del contenedor central hacia una tabla de datos clásica.
+- [x] **Vista de Lista:** Crear un botón que alterne el renderizado del contenedor central hacia una tabla de datos clásica.
 
 ## 🚀 Fase 4: Empaquetado y Despliegue Agnóstico
 Convertir el proyecto en una herramienta que pueda inyectarse en cualquier otro directorio.

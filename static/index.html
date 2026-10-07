@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pyckets</title>
-    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/styles.css?v=2">
 </head>
 <body>
     <header>
@@ -18,6 +18,23 @@
     
     <main id="board-container">
         <!-- Las columnas Kanban se inyectarán aquí dinámicamente con JavaScript -->
+    </main>
+
+    <!-- Vista de Lista (Oculta por defecto) -->
+    <main id="list-container" style="display: none;">
+        <table class="ticket-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Título</th>
+                    <th>Estado</th>
+                    <th>Etiquetas</th>
+                </tr>
+            </thead>
+            <tbody id="ticket-list-body">
+                <!-- Las filas se inyectarán con JS -->
+            </tbody>
+        </table>
     </main>
 
     <!-- Modal para Nuevo Ticket -->
