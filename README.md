@@ -15,14 +15,14 @@ El objetivo es establecer los cimientos de la base de datos y definir las entida
 ## ⚙️ Fase 2: Desarrollo de la API REST (Backend)
 Construir los endpoints necesarios para que el frontend pueda leer y modificar el estado del proyecto sin recargar la página.
 
-- [ ] **Endpoints de Lectura (GET):**
+- [x] **Endpoints de Lectura (GET):**
   - `/api/columns`: Devuelve la estructura del tablero.
   - `/api/tickets`: Devuelve todos los tickets.
   - `/api/epics`: Devuelve los epics para los filtros y etiquetas.
-- [ ] **Endpoints de Escritura (POST/PUT):**
+- [x] **Endpoints de Escritura (POST/PUT):**
   - `POST /api/tickets`: Creación de un nuevo ticket.
   - `PUT /api/tickets/{id}/status`: Endpoint ultraligero exclusivo para actualizar la columna de un ticket cuando se arrastre en el frontend.
-- [ ] **Testing del Backend:** Validar las rutas usando la interfaz interactiva autogenerada de FastAPI (`/docs`).
+- [x] **Testing del Backend:** Validar las rutas usando la interfaz interactiva autogenerada de FastAPI (`/docs`).
 
 ## 🎨 Fase 3: Interfaz de Usuario (Frontend Estático)
 Desarrollar una *Single Page Application* (SPA) sencilla usando HTML, CSS y Vanilla JavaScript (o un framework muy ligero).
