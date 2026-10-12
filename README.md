@@ -47,3 +47,11 @@ Refinar la interfaz para maximizar la velocidad de uso y alcanzar estándares pr
 - [x] **Edición en Línea (Vista de Lista):** Convertir la tabla en interactiva, permitiendo modificar estados y etiquetas directamente desde las celdas mediante menús desplegables nativos.
 - [x] **Filtros Rápidos:** Añadir una botonera de acceso rápido bajo la barra de búsqueda para aplicar filtros comunes con un solo clic.
 - [x] **Atajos de Teclado:** Implementar *listeners* globales para operar la aplicación sin ratón (`C` para crear ticket, `K` para alternar vistas, `Esc` para cerrar paneles).
+
+## 🏗️ Fase 6: Enriquecimiento de Datos y Edición Completa
+Ampliar el modelo subyacente y la interfaz para gestionar información detallada de cada tarea, acercando la herramienta a estándares profesionales.
+
+- [ ] **Expansión del Modelo de Datos:** Modificar `models.py` (SQLModel) para añadir `epic`, `assignee`, `due_date`, `time_logged` y `tags`.
+- [ ] **Endpoint de Actualización Total:** Crear la ruta `PUT /api/tickets/{id}` en el backend para sobrescribir todos los campos de un ticket.
+- [ ] **Formulario Extendido en UI:** Añadir inputs de calendario, asignación y tiempo en el panel lateral de `index.html`.
+- [ ] **Modo Edición Interactivo:** Modificar `app.js` para que al hacer clic en una tarjeta, el panel se abra rellenado con los datos actuales del ticket listo para ser modificado y guardado.
