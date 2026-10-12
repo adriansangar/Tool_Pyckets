@@ -4,25 +4,31 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pyckets</title>
-    <link rel="stylesheet" href="/static/styles.css?v=2">
+    <!-- Rompemos la caché del CSS -->
+    <link rel="stylesheet" href="/static/styles.css?v=final">
 </head>
 <body>
     <header>
         <h1>🚀 Pyckets</h1>
         <div class="controls">
-            <!-- Nuevo campo de filtrado -->
             <input type="text" id="search-filter" class="filter-input" placeholder="Buscar ticket o #etiqueta..." autocomplete="off">
-            
             <button id="toggle-view" class="btn">Vista Lista</button>
             <button id="new-ticket" class="btn primary">Nuevo Ticket</button>
         </div>
     </header>
+
+    <!-- BARRA DE FILTROS RÁPIDOS -->
+    <div id="quick-filters" class="quick-filters-bar">
+        <span class="filter-label">Filtros rápidos:</span>
+        <button class="filter-pill active" data-filter="">Todos</button>
+    </div>
     
+    <!-- VISTA KANBAN -->
     <main id="board-container">
-        <!-- Las columnas Kanban se inyectarán aquí dinámicamente con JavaScript -->
+        <!-- Las columnas se inyectan aquí -->
     </main>
 
-    <!-- Vista de Lista (Oculta por defecto) -->
+    <!-- VISTA LISTA -->
     <main id="list-container" style="display: none;">
         <table class="ticket-table">
             <thead>
@@ -34,23 +40,26 @@
                 </tr>
             </thead>
             <tbody id="ticket-list-body">
-                <!-- Las filas se inyectarán con JS -->
+                <!-- Las filas se inyectan aquí -->
             </tbody>
         </table>
     </main>
 
-    <!-- Modal para Nuevo Ticket -->
-    <div id="ticket-modal" class="modal" style="display: none;">
-        <div class="modal-content">
+    <!-- PANEL LATERAL DE CREACIÓN -->
+    <div id="side-panel" class="side-panel">
+        <div class="panel-header">
             <h2>Crear Nuevo Ticket</h2>
-            <form id="new-ticket-form">
+            <button id="close-panel" class="icon-btn">&times;</button>
+        </div>
+        <div class="panel-content">
+            <form id="ticket-form">
                 <div class="form-group">
                     <label>Título del ticket *</label>
                     <input type="text" id="ticket-title" required autocomplete="off">
                 </div>
                 <div class="form-group">
                     <label>Descripción</label>
-                    <textarea id="ticket-desc" rows="3"></textarea>
+                    <textarea id="ticket-desc" rows="4"></textarea>
                 </div>
                 <div class="form-actions">
                     <button type="button" class="btn" id="cancel-ticket">Cancelar</button>
@@ -59,6 +68,8 @@
             </form>
         </div>
     </div>
-    <script src="/static/app.js"></script>
+
+    <!-- Rompemos la caché del JS -->
+    <script src="/static/app.js?v=final"></script>
 </body>
 </html>

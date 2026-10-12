@@ -43,7 +43,7 @@ Convertir el proyecto en una herramienta que pueda inyectarse en cualquier otro 
 ## 💎 Fase 5: UI/UX Avanzada y Productividad
 Refinar la interfaz para maximizar la velocidad de uso y alcanzar estándares profesionales, manteniendo el frontend ligero y sin dependencias.
 
-- [ ] **Panel Lateral de Detalles:** Reemplazar el modal central por un panel deslizable a la derecha para permitir la edición del ticket manteniendo visible el contexto del tablero.
-- [ ] **Edición en Línea (Vista de Lista):** Convertir la tabla en interactiva, permitiendo modificar estados y etiquetas directamente desde las celdas mediante menús desplegables nativos.
-- [ ] **Filtros Rápidos:** Añadir una botonera de acceso rápido bajo la barra de búsqueda para aplicar filtros comunes con un solo clic.
-- [ ] **Atajos de Teclado:** Implementar *listeners* globales para operar la aplicación sin ratón (`C` para crear ticket, `K` para alternar vistas, `Esc` para cerrar paneles).
+- [x] **Panel Lateral de Detalles:** Reemplazar el modal central por un panel deslizable a la derecha para permitir la edición del ticket manteniendo visible el contexto del tablero.
+- [x] **Edición en Línea (Vista de Lista):** Convertir la tabla en interactiva, permitiendo modificar estados y etiquetas directamente desde las celdas mediante menús desplegables nativos.
+- [x] **Filtros Rápidos:** Añadir una botonera de acceso rápido bajo la barra de búsqueda para aplicar filtros comunes con un solo clic.
+- [x] **Atajos de Teclado:** Implementar *listeners* globales para operar la aplicación sin ratón (`C` para crear ticket, `K` para alternar vistas, `Esc` para cerrar paneles).
