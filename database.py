@@ -1,13 +1,14 @@
+import os
 from sqlmodel import SQLModel, create_engine, Session
 
-# Archivo local de SQLite. En el futuro esto podrá inyectarse vía CLI.
-sqlite_file_name = "pyckets.db"
-sqlite_url = f"sqlite:///{sqlite_file_name}"
+# 1. Leemos la ruta inyectada desde el CLI, o usamos un valor por defecto
+db_path = os.getenv("PYCKETS_DB_PATH", "pyckets.db")
+sqlite_url = f"sqlite:///{db_path}"
 
-# El flag connect_args es esencial para SQLite + FastAPI (entorno multi-hilo)
+# 2. Inicializamos el motor. echo=False para no saturar la terminal del usuario.
 engine = create_engine(
     sqlite_url, 
-    echo=True, # Cambiar a False en producción para limpiar los logs
+    echo=False, 
     connect_args={"check_same_thread": False} 
 )
 

@@ -292,3 +292,23 @@ header h1 {
     color: var(--text-muted);
     text-transform: capitalize;
 }
+
+/* --- BUSCADOR --- */
+.filter-input {
+    padding: 8px 12px;
+    border: 1px solid #dfe1e6;
+    border-radius: var(--radius-card);
+    font-family: inherit;
+    font-size: 0.9rem;
+    width: 240px;
+    height: 36px;
+    transition: var(--transition);
+    background-color: var(--bg-app);
+}
+
+.filter-input:focus {
+    outline: none;
+    border-color: var(--primary);
+    background-color: #ffffff;
+    box-shadow: 0 0 0 2px rgba(0, 82, 204, 0.2);
+}

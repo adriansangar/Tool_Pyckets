@@ -215,5 +215,27 @@ if (btnNewTicket) {
     });
 }
 
+// --- FILTRADO EN TIEMPO REAL ---
+const searchFilter = document.getElementById("search-filter");
+
+if (searchFilter) {
+    searchFilter.addEventListener("input", (e) => {
+        const term = e.target.value.toLowerCase();
+        
+        // Filtrar en la vista Kanban
+        document.querySelectorAll(".ticket-card").forEach(card => {
+            const text = card.textContent.toLowerCase();
+            // card.style.display acepta "flex" porque en nuestro CSS las tarjetas son flexboxes
+            card.style.display = text.includes(term) ? "flex" : "none";
+        });
+        
+        // Filtrar en la vista de Lista
+        document.querySelectorAll("#ticket-list-body tr").forEach(row => {
+            const text = row.textContent.toLowerCase();
+            row.style.display = text.includes(term) ? "table-row" : "none";
+        });
+    });
+}
+
 // Disparador inicial
 document.addEventListener("DOMContentLoaded", initBoard);

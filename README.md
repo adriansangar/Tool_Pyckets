@@ -36,6 +36,14 @@ Desarrollar una *Single Page Application* (SPA) sencilla usando HTML, CSS y Vani
 ## 🚀 Fase 4: Empaquetado y Despliegue Agnóstico
 Convertir el proyecto en una herramienta que pueda inyectarse en cualquier otro directorio.
 
-- [ ] **Soporte CLI (Command Line Interface):** Modificar el punto de entrada de `uvicorn` para aceptar un flag `--db-path`. Ejemplo: `python main.py --db-path ../mi-otro-proyecto/pyckets.db`.
-- [ ] **Filtros Básicos:** Implementar en el frontend los selectores para filtrar la vista actual por `Epic` o `Tag`.
-- [ ] **Documentación de Uso:** Actualizar este README con las instrucciones para arrancar el servidor en un proyecto nuevo.
+- [x] **Soporte CLI (Command Line Interface):** Modificar el punto de entrada de `uvicorn` para aceptar un flag `--db-path`. Ejemplo: `python main.py --db-path ../mi-otro-proyecto/pyckets.db`.
+- [x] **Filtros Básicos:** Implementar en el frontend los selectores para filtrar la vista actual por `Epic` o `Tag`.
+- [x] **Documentación de Uso:** Actualizar este README con las instrucciones para arrancar el servidor en un proyecto nuevo.
+
+## 💎 Fase 5: UI/UX Avanzada y Productividad
+Refinar la interfaz para maximizar la velocidad de uso y alcanzar estándares profesionales, manteniendo el frontend ligero y sin dependencias.
+
+- [ ] **Panel Lateral de Detalles:** Reemplazar el modal central por un panel deslizable a la derecha para permitir la edición del ticket manteniendo visible el contexto del tablero.
+- [ ] **Edición en Línea (Vista de Lista):** Convertir la tabla en interactiva, permitiendo modificar estados y etiquetas directamente desde las celdas mediante menús desplegables nativos.
+- [ ] **Filtros Rápidos:** Añadir una botonera de acceso rápido bajo la barra de búsqueda para aplicar filtros comunes con un solo clic.
+- [ ] **Atajos de Teclado:** Implementar *listeners* globales para operar la aplicación sin ratón (`C` para crear ticket, `K` para alternar vistas, `Esc` para cerrar paneles).
