@@ -60,21 +60,35 @@ function renderColumns(columns) {
     });
 }
 
+// --- RENDER KANBAN ACTUALIZADO ---
 function renderTickets(tickets) {
     tickets.forEach(ticket => {
         const status = ticket.status || "todo";
         const colContent = document.querySelector(`.column-content[data-status="${status}"]`);
+        
         if (colContent) {
             const ticketDiv = document.createElement("div");
             ticketDiv.className = "ticket-card";
             ticketDiv.draggable = true;
             ticketDiv.dataset.id = ticket.id;
+            
+            // Al hacer doble clic en la tarjeta del tablero, editamos
+            ticketDiv.addEventListener("dblclick", () => openEditPanel(ticket.id));
+
+            const epicHtml = ticket.epic ? `<div class="epic-badge">${ticket.epic}</div>` : '';
+            const assigneeHtml = ticket.assignee ? `<div class="assignee-avatar" title="${ticket.assignee}">${ticket.assignee.charAt(0).toUpperCase()}</div>` : '';
+            const dateHtml = ticket.due_date ? `<span>📅 ${ticket.due_date}</span>` : '';
 
             ticketDiv.innerHTML = `
+                ${epicHtml}
                 <div class="ticket-title">${ticket.title}</div>
                 ${ticket.description ? `<div class="ticket-desc">${ticket.description}</div>` : ""}
                 <div class="tags-container">
                     ${ticket.tags && ticket.tags.length > 0 ? ticket.tags.map(tag => `<span class="tag-badge">${tag}</span>`).join("") : ""}
+                </div>
+                <div class="ticket-meta">
+                    ${dateHtml}
+                    ${assigneeHtml}
                 </div>
             `;
             colContent.appendChild(ticketDiv);
@@ -82,7 +96,7 @@ function renderTickets(tickets) {
     });
 }
 
-// --- RENDER LISTA CON EDICIÓN INLINE ---
+// --- RENDER LISTA ACTUALIZADO ---
 function renderTableTickets(tickets, clearTable = false) {
     if (!ticketListBody) return;
     if (clearTable) ticketListBody.innerHTML = "";
@@ -99,17 +113,20 @@ function renderTableTickets(tickets, clearTable = false) {
 
         tr.innerHTML = `
             <td style="color: var(--text-muted); font-size: 0.85rem;">TB-${ticket.id}</td>
-            <td style="font-weight: 500; font-size: 0.95rem;">${ticket.title}</td>
+            <td style="font-weight: 600; color: var(--primary); cursor: pointer;" onclick="openEditPanel(${ticket.id})">${ticket.title}</td>
             <td>
                 <select class="status-select" onchange="syncTicketStatus(${ticket.id}, this.value)">
                     ${optionsHtml}
                 </select>
             </td>
+            <td><span class="epic-badge">${ticket.epic || '-'}</span></td>
+            <td style="font-size: 0.85rem;">${ticket.assignee || '-'}</td>
+            <td style="font-size: 0.85rem; color: var(--text-muted);">${ticket.due_date || '-'}</td>
             <td>
                 <div class="tags-container" style="margin-top: 0;">
                     ${ticket.tags && ticket.tags.length > 0
                         ? ticket.tags.map(tag => `<span class="tag-badge">${tag}</span>`).join("")
-                        : "<span style='color: #a5adba; font-size: 0.8rem;'>Sin etiquetas</span>"}
+                        : "<span style='color: #a5adba; font-size: 0.8rem;'>-</span>"}
                 </div>
             </td>
         `;
@@ -232,58 +249,143 @@ function setupDragAndDrop() {
     });
 }
 
-// --- PANEL LATERAL DE CREACIÓN ---
+// --- PANEL LATERAL DE CREACIÓN Y EDICIÓN ---
 const sidePanel = document.getElementById("side-panel");
 const btnNewTicket = document.getElementById("new-ticket");
 const btnClosePanel = document.getElementById("close-panel");
 const btnCancel = document.getElementById("cancel-ticket");
 const formTicket = document.getElementById("ticket-form");
+const panelTitle = document.getElementById("panel-title");
 
-if (btnNewTicket && sidePanel) {
+if (sidePanel) {
     const closePanel = () => {
         sidePanel.classList.remove("open");
-        setTimeout(() => { if(formTicket) formTicket.reset(); }, 300);
+        setTimeout(() => { 
+            if(formTicket) {
+                formTicket.reset(); 
+                document.getElementById("ticket-id").value = "";
+                panelTitle.textContent = "Nuevo Ticket";
+            }
+        }, 300);
     };
 
-    btnNewTicket.addEventListener("click", () => {
-        sidePanel.classList.add("open");
-        setTimeout(() => {
-            const titleInput = document.getElementById("ticket-title");
-            if(titleInput) titleInput.focus();
-        }, 300);
-    });
+    // Abrir para CREAR
+    if (btnNewTicket) {
+        btnNewTicket.addEventListener("click", () => {
+            panelTitle.textContent = "Nuevo Ticket";
+            sidePanel.classList.add("open");
+            setTimeout(() => document.getElementById("ticket-title").focus(), 300);
+        });
+    }
 
     if (btnClosePanel) btnClosePanel.addEventListener("click", closePanel);
     if (btnCancel) btnCancel.addEventListener("click", closePanel);
 
+    // Enviar datos (Crear o Editar)
     if (formTicket) {
         formTicket.addEventListener("submit", async (e) => {
             e.preventDefault();
-            const newTicketData = {
+            
+            const rawTags = document.getElementById("ticket-tags").value;
+            const tagsArray = rawTags ? rawTags.split(",").map(t => t.trim()).filter(t => t) : [];
+            const timeVal = document.getElementById("ticket-time").value;
+            
+            const ticketData = {
                 title: document.getElementById("ticket-title").value,
                 description: document.getElementById("ticket-desc").value,
-                status: "todo",
-                tags: []
+                epic: document.getElementById("ticket-epic").value || null,
+                assignee: document.getElementById("ticket-assignee").value || null,
+                due_date: document.getElementById("ticket-due").value || null,
+                time_logged: timeVal ? parseInt(timeVal) : 0,
+                tags: tagsArray,
+                status: "todo" // Por defecto, si editamos lo conservamos luego
             };
 
+            const ticketId = document.getElementById("ticket-id").value;
+            const isEditing = !!ticketId;
+            const method = isEditing ? 'PUT' : 'POST';
+            const url = isEditing ? `${API_BASE}/tickets/${ticketId}` : `${API_BASE}/tickets`;
+
+            // Si editamos, necesitamos recuperar el estado actual para no pisarlo
+            if (isEditing) {
+                const existingCard = document.querySelector(`.ticket-card[data-id="${ticketId}"]`);
+                if (existingCard) {
+                    ticketData.status = existingCard.closest('.column-content').dataset.status;
+                }
+            }
+
             try {
-                const response = await fetch(`${API_BASE}/tickets`, {
-                    method: 'POST',
+                const response = await fetch(url, {
+                    method: method,
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(newTicketData)
+                    body: JSON.stringify(ticketData)
                 });
 
                 if (response.ok) {
-                    const savedTicket = await response.json();
-                    renderTickets([savedTicket]);
-                    renderTableTickets([savedTicket], false);
-                    setupDragAndDrop();
+                    // Recargar todo el tablero para reflejar los cambios
+                    initBoard();
                     closePanel();
                 }
             } catch (error) {
                 console.error("Error al guardar:", error);
             }
         });
+    }
+
+    // ABRIR PARA EDITAR: Delegación de eventos para capturar clics en los tickets
+    document.addEventListener("click", async (e) => {
+        const card = e.target.closest(".ticket-card");
+        if (card) {
+            const ticketId = card.dataset.id;
+            try {
+                // Obtenemos los datos del ticket desde el backend
+                const response = await fetch(`${API_BASE}/tickets`);
+                const allTickets = await response.json();
+                const ticket = allTickets.find(t => t.id == ticketId);
+                
+                if (ticket) {
+                    // Rellenamos el formulario
+                    document.getElementById("ticket-id").value = ticket.id;
+                    document.getElementById("ticket-title").value = ticket.title || "";
+                    document.getElementById("ticket-desc").value = ticket.description || "";
+                    document.getElementById("ticket-epic").value = ticket.epic || "";
+                    document.getElementById("ticket-assignee").value = ticket.assignee || "";
+                    document.getElementById("ticket-due").value = ticket.due_date || "";
+                    document.getElementById("ticket-time").value = ticket.time_logged || 0;
+                    document.getElementById("ticket-tags").value = ticket.tags ? ticket.tags.join(", ") : "";
+                    
+                    panelTitle.textContent = `Editar TB-${ticket.id}`;
+                    sidePanel.classList.add("open");
+                }
+            } catch (error) {
+                console.error("Error al cargar ticket:", error);
+            }
+        }
+    });
+}
+
+// --- FUNCIÓN GLOBAL PARA EDITAR ---
+async function openEditPanel(ticketId) {
+    try {
+        const response = await fetch(`${API_BASE}/tickets`);
+        const allTickets = await response.json();
+        const ticket = allTickets.find(t => t.id == ticketId);
+        
+        if (ticket) {
+            document.getElementById("ticket-id").value = ticket.id;
+            document.getElementById("ticket-title").value = ticket.title || "";
+            document.getElementById("ticket-desc").value = ticket.description || "";
+            document.getElementById("ticket-epic").value = ticket.epic || "";
+            document.getElementById("ticket-assignee").value = ticket.assignee || "";
+            document.getElementById("ticket-due").value = ticket.due_date || "";
+            document.getElementById("ticket-time").value = ticket.time_logged || 0;
+            document.getElementById("ticket-tags").value = ticket.tags ? ticket.tags.join(", ") : "";
+            
+            document.getElementById("panel-title").textContent = `Editar TB-${ticket.id}`;
+            document.getElementById("side-panel").classList.add("open");
+        }
+    } catch (error) {
+        console.error("Error cargando el ticket:", error);
     }
 }
 

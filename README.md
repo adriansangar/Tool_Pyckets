@@ -51,7 +51,16 @@ Refinar la interfaz para maximizar la velocidad de uso y alcanzar estándares pr
 ## 🏗️ Fase 6: Enriquecimiento de Datos y Edición Completa
 Ampliar el modelo subyacente y la interfaz para gestionar información detallada de cada tarea, acercando la herramienta a estándares profesionales.
 
-- [ ] **Expansión del Modelo de Datos:** Modificar `models.py` (SQLModel) para añadir `epic`, `assignee`, `due_date`, `time_logged` y `tags`.
-- [ ] **Endpoint de Actualización Total:** Crear la ruta `PUT /api/tickets/{id}` en el backend para sobrescribir todos los campos de un ticket.
-- [ ] **Formulario Extendido en UI:** Añadir inputs de calendario, asignación y tiempo en el panel lateral de `index.html`.
-- [ ] **Modo Edición Interactivo:** Modificar `app.js` para que al hacer clic en una tarjeta, el panel se abra rellenado con los datos actuales del ticket listo para ser modificado y guardado.
+- [x] **Expansión del Modelo de Datos:** Modificar `models.py` (SQLModel) para añadir `epic`, `assignee`, `due_date`, `time_logged` y `tags`.
+- [x] **Endpoint de Actualización Total:** Crear la ruta `PUT /api/tickets/{id}` en el backend para sobrescribir todos los campos de un ticket.
+- [x] **Formulario Extendido en UI:** Añadir inputs de calendario, asignación y tiempo en el panel lateral de `index.html`.
+- [x] **Modo Edición Interactivo:** Modificar `app.js` para que al hacer clic en una tarjeta, el panel se abra rellenado con los datos actuales del ticket listo para ser modificado y guardado.
+
+## 🌌 Fase 7: Arquitectura Multi-Proyecto y UI Premium
+Evolución del frontend hacia una experiencia de alto rendimiento (inspiración Linear/Jira/Monday) con soporte para múltiples espacios de trabajo.
+
+- [ ] **Estructura Multi-Tablero:** Refactorización de `models.py` para crear la entidad `Project` y vincular mediante llaves foráneas los tickets y columnas a proyectos específicos.
+- [ ] **Layout con Barra Lateral (Sidebar):** Implementación de un menú lateral colapsable para crear, organizar y alternar entre distintos tableros al instante.
+- [ ] **Dark Mode Profesional:** Rediseño total de la paleta CSS usando variables dinámicas para un tema oscuro de alto contraste (grises profundos, bordes sutiles y acentos de color).
+- [ ] **Filtros Inteligentes (Omnibar):** Evolución del buscador superior hacia una barra de comandos avanzada capaz de interpretar queries compuestas (ej. `is:bug @adrian`).
+- [ ] **Tableros Customizables:** Lógica en el frontend y backend para permitir añadir, renombrar, colorear y reordenar columnas de forma independiente para cada proyecto.

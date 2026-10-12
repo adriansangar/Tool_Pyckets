@@ -439,3 +439,33 @@ header h1 {
     border-color: #006644;
     font-weight: 600;
 }
+
+/* --- METADATOS DEL TICKET (Fase 6) --- */
+.ticket-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 10px;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.assignee-avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background-color: var(--primary);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: 0.75rem;
+}
+
+.epic-badge {
+    font-size: 0.75rem;
+    color: #ff5630;
+    font-weight: 700;
+    margin-bottom: 4px;
+}

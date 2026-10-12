@@ -1,6 +1,8 @@
-import json
 from typing import Optional, List
 from sqlmodel import Field, SQLModel
+# Importamos Column con un alias (SAColumn) para que no choque con tu clase Column
+from sqlalchemy import Column as SAColumn, JSON
+from datetime import date
 
 class Column(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -16,17 +18,12 @@ class Ticket(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     title: str
     description: Optional[str] = None
-    status: str
-    epic_id: Optional[int] = Field(default=None, foreign_key="epic.id")
-    release: Optional[str] = None
+    status: str = "todo"
     
-    # SQLite no tiene tipo Array nativo. Guardamos como string y usamos properties
-    tags_json: Optional[str] = Field(default="[]")
-
-    @property
-    def tags(self) -> List[str]:
-        return json.loads(self.tags_json) if self.tags_json else []
-
-    @tags.setter
-    def tags(self, value: List[str]):
-        self.tags_json = json.dumps(value)
+    # Usamos el alias SAColumn aquí
+    tags: List[str] = Field(default_factory=list, sa_column=SAColumn(JSON))
+    
+    epic: Optional[str] = None          
+    assignee: Optional[str] = None      
+    due_date: Optional[date] = None     
+    time_logged: Optional[int] = 0

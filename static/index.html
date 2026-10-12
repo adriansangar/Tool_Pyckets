@@ -36,6 +36,9 @@
                     <th>ID</th>
                     <th>Título</th>
                     <th>Estado</th>
+                    <th>Epic</th>
+                    <th>Asignado</th>
+                    <th>Vencimiento</th>
                     <th>Etiquetas</th>
                 </tr>
             </thead>
@@ -46,29 +49,60 @@
     </main>
 
     <!-- PANEL LATERAL DE CREACIÓN -->
+    <!-- PANEL LATERAL DE CREACIÓN/EDICIÓN -->
     <div id="side-panel" class="side-panel">
         <div class="panel-header">
-            <h2>Crear Nuevo Ticket</h2>
+            <h2 id="panel-title">Nuevo Ticket</h2>
             <button id="close-panel" class="icon-btn">&times;</button>
         </div>
         <div class="panel-content">
             <form id="ticket-form">
+                <input type="hidden" id="ticket-id"> <!-- Campo oculto para saber si editamos o creamos -->
+                
                 <div class="form-group">
                     <label>Título del ticket *</label>
                     <input type="text" id="ticket-title" required autocomplete="off">
                 </div>
+                
                 <div class="form-group">
                     <label>Descripción</label>
-                    <textarea id="ticket-desc" rows="4"></textarea>
+                    <textarea id="ticket-desc" rows="3"></textarea>
                 </div>
+
+                <div style="display: flex; gap: 1rem;">
+                    <div class="form-group" style="flex: 1;">
+                        <label>Epic</label>
+                        <input type="text" id="ticket-epic" placeholder="Ej: Core Engine">
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label>Asignado a</label>
+                        <input type="text" id="ticket-assignee" placeholder="Ej: Adrian">
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 1rem;">
+                    <div class="form-group" style="flex: 1;">
+                        <label>Fecha límite</label>
+                        <input type="date" id="ticket-due">
+                    </div>
+                    <div class="form-group" style="flex: 1;">
+                        <label>Horas registradas</label>
+                        <input type="number" id="ticket-time" min="0" value="0">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Etiquetas (separadas por coma)</label>
+                    <input type="text" id="ticket-tags" placeholder="backend, bug, ui">
+                </div>
+
                 <div class="form-actions">
                     <button type="button" class="btn" id="cancel-ticket">Cancelar</button>
-                    <button type="submit" class="btn primary">Guardar</button>
+                    <button type="submit" class="btn primary">Guardar Ticket</button>
                 </div>
             </form>
         </div>
     </div>
-
     <!-- Rompemos la caché del JS -->
     <script src="/static/app.js?v=final"></script>
 </body>

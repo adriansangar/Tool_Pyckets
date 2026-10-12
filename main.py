@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session, select
 from pydantic import BaseModel
 from typing import List, Optional
+from datetime import datetime
 import os
 
 # Importamos lo que creamos en la Fase 1
@@ -69,19 +70,37 @@ def get_tickets(session: Session = Depends(get_session)):
 
 # --- ENDPOINTS DE ESCRITURA (POST / PUT) ---
 
-@app.post("/api/tickets", response_model=Ticket)
-def create_ticket(ticket_in: TicketCreate, session: Session = Depends(get_session)):
-    """Crea un nuevo ticket en la base de datos."""
-    db_ticket = Ticket(
-        title=ticket_in.title,
-        description=ticket_in.description,
-        status=ticket_in.status,
-        epic_id=ticket_in.epic_id,
-        release=ticket_in.release
-    )
-    # Usamos el setter de la property para convertir la lista a JSON internamente
-    db_ticket.tags = ticket_in.tags 
+@app.post("/api/tickets")
+def create_ticket(ticket: Ticket, session: Session = Depends(get_session)):
+    # Convertimos la fecha de texto a objeto Date si viene desde el frontend
+    if isinstance(ticket.due_date, str) and ticket.due_date.strip():
+        ticket.due_date = datetime.strptime(ticket.due_date, "%Y-%m-%d").date()
+        
+    session.add(ticket)
+    session.commit()
+    session.refresh(ticket)
+    return ticket
+
+@app.put("/api/tickets/{ticket_id}")
+def update_full_ticket(ticket_id: int, ticket_update: Ticket, session: Session = Depends(get_session)):
+    db_ticket = session.get(Ticket, ticket_id)
+    if not db_ticket:
+        raise HTTPException(status_code=404, detail="Ticket no encontrado")
     
+    db_ticket.title = ticket_update.title
+    db_ticket.description = ticket_update.description
+    db_ticket.status = ticket_update.status
+    db_ticket.tags = ticket_update.tags
+    db_ticket.epic = ticket_update.epic
+    db_ticket.assignee = ticket_update.assignee
+    db_ticket.time_logged = ticket_update.time_logged
+    
+    # Transformamos la fecha antes de guardarla
+    if isinstance(ticket_update.due_date, str) and ticket_update.due_date.strip():
+        db_ticket.due_date = datetime.strptime(ticket_update.due_date, "%Y-%m-%d").date()
+    else:
+        db_ticket.due_date = ticket_update.due_date
+        
     session.add(db_ticket)
     session.commit()
     session.refresh(db_ticket)
