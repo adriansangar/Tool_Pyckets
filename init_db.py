@@ -1,19 +1,18 @@
-
 from sqlmodel import Session
 from database import create_db_and_tables, engine
-from models import Column, Epic
+from models import Column, Epic, Project
 
 def create_seed_data():
     with Session(engine) as session:
-        # Crear columnas por defecto
         todo = Column(name="To Do", order=1)
         in_progress = Column(name="In Progress", order=2)
         done = Column(name="Done", order=3)
         
-        # Crear un Epic de ejemplo
+        core_engine = Project(name="Core Engine", color="#ff5630")
+        ui_redesign = Project(name="Frontend Redesign", color="#36b37e")
         core_epic = Epic(name="Core Engine", color="#ff5733")
         
-        session.add_all([todo, in_progress, done, core_epic])
+        session.add_all([todo, in_progress, done, core_epic, core_engine, ui_redesign])
         session.commit()
         print("Datos semilla insertados correctamente.")
 

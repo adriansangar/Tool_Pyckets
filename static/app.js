@@ -6,13 +6,19 @@ const btnToggleView = document.getElementById("toggle-view");
 
 let isListView = false;
 let globalColumns = [];
+let currentProjectId = null;
 
-// --- INIT: Carga inicial ---
 async function initBoard() {
+    await loadProjects();
+    await fetchAndRenderTickets();
+}
+
+async function fetchAndRenderTickets() {
     try {
+        const url = currentProjectId ? `${API_BASE}/tickets?project_id=${currentProjectId}` : `${API_BASE}/tickets`;
         const [columnsRes, ticketsRes] = await Promise.all([
             fetch(`${API_BASE}/columns`),
-            fetch(`${API_BASE}/tickets`)
+            fetch(url)
         ]);
 
         globalColumns = await columnsRes.json();
@@ -28,7 +34,6 @@ async function initBoard() {
     }
 }
 
-// --- TOGGLE VISTAS ---
 if (btnToggleView) {
     btnToggleView.addEventListener("click", () => {
         isListView = !isListView;
@@ -44,7 +49,6 @@ if (btnToggleView) {
     });
 }
 
-// --- RENDER KANBAN ---
 function renderColumns(columns) {
     if (!boardContainer) return;
     boardContainer.innerHTML = "";
@@ -60,7 +64,6 @@ function renderColumns(columns) {
     });
 }
 
-// --- RENDER KANBAN ACTUALIZADO ---
 function renderTickets(tickets) {
     tickets.forEach(ticket => {
         const status = ticket.status || "todo";
@@ -72,7 +75,6 @@ function renderTickets(tickets) {
             ticketDiv.draggable = true;
             ticketDiv.dataset.id = ticket.id;
             
-            // Al hacer doble clic en la tarjeta del tablero, editamos
             ticketDiv.addEventListener("dblclick", () => openEditPanel(ticket.id));
 
             const epicHtml = ticket.epic ? `<div class="epic-badge">${ticket.epic}</div>` : '';
@@ -96,7 +98,6 @@ function renderTickets(tickets) {
     });
 }
 
-// --- RENDER LISTA ACTUALIZADO ---
 function renderTableTickets(tickets, clearTable = false) {
     if (!ticketListBody) return;
     if (clearTable) ticketListBody.innerHTML = "";
@@ -134,7 +135,6 @@ function renderTableTickets(tickets, clearTable = false) {
     });
 }
 
-// --- FILTROS RÁPIDOS ---
 function renderQuickFilters(tickets) {
     const filtersBar = document.getElementById("quick-filters");
     if (!filtersBar) return;
@@ -171,7 +171,6 @@ function renderQuickFilters(tickets) {
     });
 }
 
-// --- BÚSQUEDA REACTIVA ---
 const searchFilter = document.getElementById("search-filter");
 if (searchFilter) {
     searchFilter.addEventListener("input", (e) => {
@@ -185,7 +184,6 @@ if (searchFilter) {
     });
 }
 
-// --- SINCRONIZADOR DE ESTADOS (API + DOM) ---
 async function syncTicketStatus(ticketId, newStatus) {
     await updateTicketStatus(ticketId, newStatus);
     const ticketCard = document.querySelector(`.ticket-card[data-id="${ticketId}"]`);
@@ -207,7 +205,6 @@ async function updateTicketStatus(ticketId, status) {
     }
 }
 
-// --- DRAG & DROP ---
 let draggedTicket = null;
 function setupDragAndDrop() {
     const tickets = document.querySelectorAll('.ticket-card');
@@ -249,7 +246,6 @@ function setupDragAndDrop() {
     });
 }
 
-// --- PANEL LATERAL DE CREACIÓN Y EDICIÓN ---
 const sidePanel = document.getElementById("side-panel");
 const btnNewTicket = document.getElementById("new-ticket");
 const btnClosePanel = document.getElementById("close-panel");
@@ -269,7 +265,6 @@ if (sidePanel) {
         }, 300);
     };
 
-    // Abrir para CREAR
     if (btnNewTicket) {
         btnNewTicket.addEventListener("click", () => {
             panelTitle.textContent = "Nuevo Ticket";
@@ -281,7 +276,6 @@ if (sidePanel) {
     if (btnClosePanel) btnClosePanel.addEventListener("click", closePanel);
     if (btnCancel) btnCancel.addEventListener("click", closePanel);
 
-    // Enviar datos (Crear o Editar)
     if (formTicket) {
         formTicket.addEventListener("submit", async (e) => {
             e.preventDefault();
@@ -297,8 +291,9 @@ if (sidePanel) {
                 assignee: document.getElementById("ticket-assignee").value || null,
                 due_date: document.getElementById("ticket-due").value || null,
                 time_logged: timeVal ? parseInt(timeVal) : 0,
+                project_id: currentProjectId,
                 tags: tagsArray,
-                status: "todo" // Por defecto, si editamos lo conservamos luego
+                status: "todo"
             };
 
             const ticketId = document.getElementById("ticket-id").value;
@@ -306,7 +301,6 @@ if (sidePanel) {
             const method = isEditing ? 'PUT' : 'POST';
             const url = isEditing ? `${API_BASE}/tickets/${ticketId}` : `${API_BASE}/tickets`;
 
-            // Si editamos, necesitamos recuperar el estado actual para no pisarlo
             if (isEditing) {
                 const existingCard = document.querySelector(`.ticket-card[data-id="${ticketId}"]`);
                 if (existingCard) {
@@ -322,8 +316,7 @@ if (sidePanel) {
                 });
 
                 if (response.ok) {
-                    // Recargar todo el tablero para reflejar los cambios
-                    initBoard();
+                    fetchAndRenderTickets();
                     closePanel();
                 }
             } catch (error) {
@@ -331,40 +324,8 @@ if (sidePanel) {
             }
         });
     }
-
-    // ABRIR PARA EDITAR: Delegación de eventos para capturar clics en los tickets
-    document.addEventListener("click", async (e) => {
-        const card = e.target.closest(".ticket-card");
-        if (card) {
-            const ticketId = card.dataset.id;
-            try {
-                // Obtenemos los datos del ticket desde el backend
-                const response = await fetch(`${API_BASE}/tickets`);
-                const allTickets = await response.json();
-                const ticket = allTickets.find(t => t.id == ticketId);
-                
-                if (ticket) {
-                    // Rellenamos el formulario
-                    document.getElementById("ticket-id").value = ticket.id;
-                    document.getElementById("ticket-title").value = ticket.title || "";
-                    document.getElementById("ticket-desc").value = ticket.description || "";
-                    document.getElementById("ticket-epic").value = ticket.epic || "";
-                    document.getElementById("ticket-assignee").value = ticket.assignee || "";
-                    document.getElementById("ticket-due").value = ticket.due_date || "";
-                    document.getElementById("ticket-time").value = ticket.time_logged || 0;
-                    document.getElementById("ticket-tags").value = ticket.tags ? ticket.tags.join(", ") : "";
-                    
-                    panelTitle.textContent = `Editar TB-${ticket.id}`;
-                    sidePanel.classList.add("open");
-                }
-            } catch (error) {
-                console.error("Error al cargar ticket:", error);
-            }
-        }
-    });
 }
 
-// --- FUNCIÓN GLOBAL PARA EDITAR ---
 async function openEditPanel(ticketId) {
     try {
         const response = await fetch(`${API_BASE}/tickets`);
@@ -389,7 +350,6 @@ async function openEditPanel(ticketId) {
     }
 }
 
-// --- ATAJOS DE TECLADO ---
 document.addEventListener("keydown", (e) => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
         if (e.key === 'Escape' && sidePanel && sidePanel.classList.contains("open")) {
@@ -399,9 +359,12 @@ document.addEventListener("keydown", (e) => {
         return;
     }
 
-    if (e.key.toLowerCase() === 'c' && btnNewTicket) {
-        e.preventDefault();
-        btnNewTicket.click();
+    if (e.key.toLowerCase() === 'c') {
+        const newTicketBtn = document.getElementById("sidebar-new-ticket");
+        if (newTicketBtn) {
+            e.preventDefault();
+            newTicketBtn.click();
+        }
     }
 
     if (e.key.toLowerCase() === 'k' && btnToggleView) {
@@ -414,5 +377,64 @@ document.addEventListener("keydown", (e) => {
     }
 });
 
-// --- ARRANQUE ---
+const toggleSidebarBtn = document.getElementById('toggle-sidebar');
+const sidebar = document.getElementById('sidebar');
+
+if (toggleSidebarBtn && sidebar) {
+    toggleSidebarBtn.addEventListener('click', () => {
+        sidebar.classList.toggle('collapsed');
+    });
+}
+
+const sidebarNewTicketBtn = document.getElementById("sidebar-new-ticket");
+if (sidebarNewTicketBtn && sidePanel) {
+    sidebarNewTicketBtn.addEventListener("click", () => {
+        document.getElementById("panel-title").textContent = "Nuevo Ticket";
+        sidePanel.classList.add("open");
+        setTimeout(() => document.getElementById("ticket-title").focus(), 300);
+    });
+}
+
+async function loadProjects() {
+    try {
+        const res = await fetch(`${API_BASE}/projects`);
+        const projects = await res.json();
+        const projectList = document.getElementById("project-list");
+        if(!projectList) return;
+        
+        projectList.innerHTML = "";
+        projects.forEach(p => {
+            const a = document.createElement("a");
+            a.className = "nav-item project-link";
+            a.href = "#";
+            a.innerHTML = `<span class="project-color" style="background-color: ${p.color};"></span> <span class="text">${p.name}</span>`;
+            
+            a.addEventListener("click", (e) => {
+                e.preventDefault();
+                document.querySelectorAll(".project-link").forEach(el => el.classList.remove("active"));
+                a.classList.add("active");
+                currentProjectId = p.id;
+                document.getElementById("board-title").textContent = p.name;
+                fetchAndRenderTickets();
+            });
+            
+            projectList.appendChild(a);
+        });
+    } catch (e) {
+        console.error("Error cargando proyectos:", e);
+    }
+}
+
+const themeToggleBtn = document.getElementById("theme-toggle");
+if (themeToggleBtn) {
+    themeToggleBtn.addEventListener("click", () => {
+        const currentTheme = document.documentElement.getAttribute("data-theme");
+        if (currentTheme === "dark") {
+            document.documentElement.removeAttribute("data-theme");
+        } else {
+            document.documentElement.setAttribute("data-theme", "dark");
+        }
+    });
+}
+
 document.addEventListener("DOMContentLoaded", initBoard);
