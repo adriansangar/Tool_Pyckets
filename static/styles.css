@@ -292,3 +292,48 @@ header {
 [data-theme="dark"] .quick-filters-bar, [data-theme="dark"] .panel-header {
     background-color: var(--bg-card);
 }
+
+/* --- MODAL CREACIÓN PROYECTOS --- */
+.modal-overlay {
+    position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+    background: rgba(9, 30, 66, 0.54); display: flex; justify-content: center; align-items: center; z-index: 2000;
+}
+.modal-content {
+    background: var(--bg-card); padding: 2rem; border-radius: var(--radius-col);
+    width: 400px; box-shadow: var(--shadow-hover); color: var(--text-main);
+}
+[data-theme="dark"] .modal-content { border: 1px solid var(--sidebar-border); }
+
+/* --- DASHBOARD HOME --- */
+.stats-grid { display: flex; gap: 1.5rem; margin-top: 1.5rem; }
+.stat-card {
+    background: var(--bg-card); padding: 1.5rem; border-radius: var(--radius-col);
+    border: 1px solid var(--sidebar-border); flex: 1; box-shadow: var(--shadow-sm);
+}
+.stat-card h3 { margin: 0 0 0.5rem 0; font-size: 0.9rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.stat-card p { margin: 0; font-size: 2.5rem; font-weight: 700; color: var(--primary); }
+
+/* --- MODALES Y ARCHIVADOS --- */
+.modal-overlay {
+    position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+    background: rgba(9, 30, 66, 0.54); display: flex; justify-content: center; align-items: center; z-index: 2000;
+}
+.modal-content {
+    background: var(--bg-card); padding: 2rem; border-radius: var(--radius-col);
+    width: 400px; box-shadow: var(--shadow-hover); color: var(--text-main);
+}
+[data-theme="dark"] .modal-content { border: 1px solid var(--sidebar-border); }
+
+.stats-grid { display: flex; gap: 1.5rem; margin-top: 1.5rem; }
+.stat-card {
+    background: var(--bg-card); padding: 1.5rem; border-radius: var(--radius-col);
+    border: 1px solid var(--sidebar-border); flex: 1; box-shadow: var(--shadow-sm);
+}
+.stat-card h3 { margin: 0 0 0.5rem 0; font-size: 0.9rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+.stat-card p { margin: 0; font-size: 2.5rem; font-weight: 700; color: var(--primary); }
+
+.archived-item {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0.75rem 0; border-bottom: 1px solid var(--sidebar-border);
+}
+.archived-item:last-child { border-bottom: none; }

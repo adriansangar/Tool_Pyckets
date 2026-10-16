@@ -4,10 +4,17 @@ const listContainer = document.getElementById("list-container");
 const ticketListBody = document.getElementById("ticket-list-body");
 const btnToggleView = document.getElementById("toggle-view");
 
+const navGlobalAll = document.getElementById("nav-global-all");
+const navGlobalMine = document.getElementById("nav-global-mine");
+const headerNewTicketBtn = document.getElementById("header-new-ticket");
+const focusSearchBtn = document.getElementById("focus-search");
+const searchInput = document.getElementById("search-filter");
+
 let isListView = false;
 let globalColumns = [];
 let currentProjectId = null;
 
+// --- INIT: Carga inicial ---
 async function initBoard() {
     await loadProjects();
     await fetchAndRenderTickets();
@@ -34,9 +41,126 @@ async function fetchAndRenderTickets() {
     }
 }
 
+// --- NAVEGACIÓN Y VISTAS GLOBALES ---
+if (focusSearchBtn && searchInput) {
+    focusSearchBtn.addEventListener("click", () => searchInput.focus());
+}
+
+if (navGlobalAll) {
+    navGlobalAll.addEventListener("click", (e) => {
+        e.preventDefault();
+        document.querySelectorAll(".nav-item").forEach(el => el.classList.remove("active"));
+        navGlobalAll.classList.add("active");
+        
+        currentProjectId = null;
+        document.getElementById("board-title").textContent = "Todos los Tickets";
+        if (headerNewTicketBtn) headerNewTicketBtn.style.display = "none";
+        
+        document.getElementById("project-home").style.display = "none";
+        document.getElementById("quick-filters").style.display = "flex";
+        
+        if (isListView) {
+            document.getElementById("list-container").style.display = "block";
+            boardContainer.style.display = "none";
+        } else {
+            boardContainer.style.display = "flex";
+            document.getElementById("list-container").style.display = "none";
+        }
+        
+        fetchAndRenderTickets();
+    });
+}
+
+if (navGlobalMine) {
+    navGlobalMine.addEventListener("click", async (e) => {
+        e.preventDefault();
+        document.querySelectorAll(".nav-item").forEach(el => el.classList.remove("active"));
+        navGlobalMine.classList.add("active");
+        
+        currentProjectId = null;
+        document.getElementById("board-title").textContent = "Mis Tickets (Asignados a mí)";
+        if (headerNewTicketBtn) headerNewTicketBtn.style.display = "none";
+        
+        document.getElementById("project-home").style.display = "none";
+        document.getElementById("quick-filters").style.display = "flex";
+        
+        if (isListView) {
+            document.getElementById("list-container").style.display = "block";
+            boardContainer.style.display = "none";
+        } else {
+            boardContainer.style.display = "flex";
+            document.getElementById("list-container").style.display = "none";
+        }
+        
+        try {
+            const res = await fetch(`${API_BASE}/tickets`);
+            const allTickets = await res.json();
+            const myTickets = allTickets.filter(t => t.assignee && t.assignee.toLowerCase() === 'adrian');
+            
+            renderColumns(globalColumns);
+            renderTickets(myTickets);
+            renderTableTickets(myTickets, true);
+        } catch (error) {
+            console.error("Error filtrando mis tickets:", error);
+        }
+    });
+}
+
+// --- CARGA DINÁMICA DE PROYECTOS ---
+async function loadProjects() {
+    try {
+        const res = await fetch(`${API_BASE}/projects`);
+        const projects = await res.json();
+        const projectList = document.getElementById("project-list");
+        if(!projectList) return;
+        
+        projectList.innerHTML = "";
+        projects.forEach(p => {
+            const a = document.createElement("a");
+            a.className = "nav-item project-link";
+            a.href = "#";
+            a.innerHTML = `<span class="project-color" style="background-color: ${p.color};"></span> <span class="text">${p.name}</span>`;
+            
+            a.addEventListener("click", async (e) => {
+                e.preventDefault();
+                document.querySelectorAll(".nav-item").forEach(el => el.classList.remove("active"));
+                a.classList.add("active");
+                
+                currentProjectId = p.id;
+                document.getElementById("board-title").textContent = p.name;
+                if (headerNewTicketBtn) headerNewTicketBtn.style.display = "inline-flex"; 
+                
+                boardContainer.style.display = "none";
+                if (listContainer) listContainer.style.display = "none";
+                document.getElementById("quick-filters").style.display = "none";
+                
+                const home = document.getElementById("project-home");
+                if (home) {
+                    home.style.display = "block";
+                    document.getElementById("home-project-name").textContent = `Resumen: ${p.name}`;
+                    
+                    const tRes = await fetch(`${API_BASE}/tickets?project_id=${currentProjectId}`);
+                    const tickets = await tRes.json();
+                    document.getElementById("stat-total").textContent = tickets.length;
+                    document.getElementById("stat-done").textContent = tickets.filter(t => t.status === "done").length;
+                }
+            });
+            
+            projectList.appendChild(a);
+        });
+    } catch (e) {
+        console.error("Error cargando proyectos:", e);
+    }
+}
+
+// --- TOGGLE VISTAS ---
 if (btnToggleView) {
     btnToggleView.addEventListener("click", () => {
         isListView = !isListView;
+        
+        const home = document.getElementById("project-home");
+        if (home && home.style.display !== "none") return;
+
         if (isListView) {
             boardContainer.style.display = "none";
             if (listContainer) listContainer.style.display = "block";
@@ -49,6 +173,7 @@ if (btnToggleView) {
     });
 }
 
+// --- RENDERIZADO ---
 function renderColumns(columns) {
     if (!boardContainer) return;
     boardContainer.innerHTML = "";
@@ -162,7 +287,6 @@ function renderQuickFilters(tickets) {
             filtersBar.querySelectorAll(".filter-pill").forEach(p => p.classList.remove("active"));
             e.target.classList.add("active");
 
-            const searchInput = document.getElementById("search-filter");
             if (searchInput) {
                 searchInput.value = e.target.dataset.filter;
                 searchInput.dispatchEvent(new Event('input'));
@@ -171,9 +295,8 @@ function renderQuickFilters(tickets) {
     });
 }
 
-const searchFilter = document.getElementById("search-filter");
-if (searchFilter) {
-    searchFilter.addEventListener("input", (e) => {
+if (searchInput) {
+    searchInput.addEventListener("input", (e) => {
         const term = e.target.value.toLowerCase();
         document.querySelectorAll(".ticket-card").forEach(card => {
             card.style.display = card.textContent.toLowerCase().includes(term) ? "flex" : "none";
@@ -247,7 +370,6 @@ function setupDragAndDrop() {
 }
 
 const sidePanel = document.getElementById("side-panel");
-const btnNewTicket = document.getElementById("new-ticket");
 const btnClosePanel = document.getElementById("close-panel");
 const btnCancel = document.getElementById("cancel-ticket");
 const formTicket = document.getElementById("ticket-form");
@@ -265,8 +387,8 @@ if (sidePanel) {
         }, 300);
     };
 
-    if (btnNewTicket) {
-        btnNewTicket.addEventListener("click", () => {
+    if (headerNewTicketBtn) {
+        headerNewTicketBtn.addEventListener("click", () => {
             panelTitle.textContent = "Nuevo Ticket";
             sidePanel.classList.add("open");
             setTimeout(() => document.getElementById("ticket-title").focus(), 300);
@@ -342,14 +464,165 @@ async function openEditPanel(ticketId) {
             document.getElementById("ticket-time").value = ticket.time_logged || 0;
             document.getElementById("ticket-tags").value = ticket.tags ? ticket.tags.join(", ") : "";
             
-            document.getElementById("panel-title").textContent = `Editar TB-${ticket.id}`;
-            document.getElementById("side-panel").classList.add("open");
+            panelTitle.textContent = `Editar TB-${ticket.id}`;
+            sidePanel.classList.add("open");
         }
     } catch (error) {
         console.error("Error cargando el ticket:", error);
     }
 }
 
+// --- IR AL TABLERO KANBAN ---
+const btnGoBoard = document.getElementById("btn-go-board");
+if (btnGoBoard) {
+    btnGoBoard.addEventListener("click", () => {
+        document.getElementById("project-home").style.display = "none";
+        document.getElementById("quick-filters").style.display = "flex";
+        
+        if (isListView) {
+            document.getElementById("list-container").style.display = "block";
+        } else {
+            document.getElementById("board-container").style.display = "flex";
+        }
+        fetchAndRenderTickets();
+    });
+}
+
+// --- ARCHIVAR PROYECTO ACTUAL ---
+const btnArchiveProject = document.getElementById("btn-archive-project");
+if (btnArchiveProject) {
+    btnArchiveProject.addEventListener("click", async () => {
+        if (!currentProjectId) return;
+
+        const confirmArchive = confirm("¿Seguro que quieres archivar este proyecto?");
+        if (confirmArchive) {
+            try {
+                const res = await fetch(`${API_BASE}/projects/${currentProjectId}/archive`, {
+                    method: 'PUT'
+                });
+                if (res.ok) {
+                    currentProjectId = null;
+                    await loadProjects();
+                    document.getElementById("nav-global-all").click();
+                }
+            } catch (err) {
+                console.error("Error archivando el proyecto:", err);
+            }
+        }
+    });
+}
+
+// --- MODAL CREAR PROYECTO ---
+const projectModal = document.getElementById("project-modal");
+const btnOpenCreateProject = document.getElementById("btn-open-create-project");
+const btnCloseProjectModal = document.getElementById("close-project-modal");
+const projectForm = document.getElementById("project-form");
+
+if (btnOpenCreateProject) btnOpenCreateProject.addEventListener("click", () => projectModal.style.display = "flex");
+if (btnCloseProjectModal) btnCloseProjectModal.addEventListener("click", () => projectModal.style.display = "none");
+
+if (projectForm) {
+    projectForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const name = document.getElementById("new-project-name").value;
+        const color = document.getElementById("new-project-color").value;
+
+        try {
+            const res = await fetch(`${API_BASE}/projects`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, color })
+            });
+            if (res.ok) {
+                projectModal.style.display = "none";
+                projectForm.reset();
+                await loadProjects();
+            }
+        } catch (err) {
+            console.error("Error creando proyecto", err);
+        }
+    });
+}
+
+// --- MODAL PROYECTOS ARCHIVADOS Y ACCIONES ---
+const archivedModal = document.getElementById("archived-projects-modal");
+const navArchivedProjects = document.getElementById("nav-archived-projects");
+const closeArchivedModal = document.getElementById("close-archived-modal");
+
+if (navArchivedProjects) {
+    navArchivedProjects.addEventListener("click", async (e) => {
+        e.preventDefault();
+        await renderArchivedProjectsList();
+        archivedModal.style.display = "flex";
+    });
+}
+
+if (closeArchivedModal) {
+    closeArchivedModal.addEventListener("click", () => archivedModal.style.display = "none");
+}
+
+async function renderArchivedProjectsList() {
+    const listContainer = document.getElementById("archived-project-list");
+    if (!listContainer) return;
+
+    try {
+        const res = await fetch(`${API_BASE}/projects?include_archived=true`);
+        const allProjects = await res.json();
+        const archivedProjects = allProjects.filter(p => p.is_archived);
+
+        if (archivedProjects.length === 0) {
+            listContainer.innerHTML = "<p style='color: var(--text-muted); font-size: 0.9rem;'>No hay proyectos archivados.</p>";
+            return;
+        }
+
+        listContainer.innerHTML = "";
+        archivedProjects.forEach(p => {
+            const div = document.createElement("div");
+            div.className = "archived-item";
+            div.innerHTML = `
+                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <span class="project-color" style="background-color: ${p.color};"></span>
+                    <span style="font-weight: 600;">${p.name}</span>
+                </div>
+                <div style="display: flex; gap: 0.5rem;">
+                    <button class="btn" style="padding: 4px 10px; font-size: 0.8rem;" onclick="unarchiveProject(${p.id})">Restaurar</button>
+                    <button class="btn" style="padding: 4px 10px; font-size: 0.8rem; color: #ff5630; border-color: #ff5630;" onclick="deleteProjectPermanently(${p.id})">Eliminar</button>
+                </div>
+            `;
+            listContainer.appendChild(div);
+        });
+    } catch (err) {
+        console.error("Error cargando proyectos archivados:", err);
+    }
+}
+
+window.unarchiveProject = async function(projectId) {
+    try {
+        const res = await fetch(`${API_BASE}/projects/${projectId}/unarchive`, { method: 'PUT' });
+        if (res.ok) {
+            await loadProjects();
+            await renderArchivedProjectsList();
+        }
+    } catch (err) {
+        console.error("Error al restaurar proyecto:", err);
+    }
+};
+
+window.deleteProjectPermanently = async function(projectId) {
+    if (confirm("⚠️ ¿Seguro que quieres ELIMINAR permanentemente este proyecto y TODOS sus tickets? Esta acción no se puede deshacer.")) {
+        try {
+            const res = await fetch(`${API_BASE}/projects/${projectId}`, { method: 'DELETE' });
+            if (res.ok) {
+                await loadProjects();
+                await renderArchivedProjectsList();
+            }
+        } catch (err) {
+            console.error("Error al eliminar proyecto:", err);
+        }
+    }
+};
+
+// --- ATAJOS DE TECLADO ---
 document.addEventListener("keydown", (e) => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
         if (e.key === 'Escape' && sidePanel && sidePanel.classList.contains("open")) {
@@ -359,24 +632,29 @@ document.addEventListener("keydown", (e) => {
         return;
     }
 
-    if (e.key.toLowerCase() === 'c') {
-        const newTicketBtn = document.getElementById("sidebar-new-ticket");
-        if (newTicketBtn) {
-            e.preventDefault();
-            newTicketBtn.click();
-        }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        if (searchInput) searchInput.focus();
     }
 
-    if (e.key.toLowerCase() === 'k' && btnToggleView) {
+    if (e.key.toLowerCase() === 'c' && currentProjectId) {
+        e.preventDefault();
+        if (headerNewTicketBtn) headerNewTicketBtn.click();
+    }
+
+    if (e.key.toLowerCase() === 'k' && !(e.ctrlKey || e.metaKey) && btnToggleView) {
         e.preventDefault();
         btnToggleView.click();
     }
 
-    if (e.key === 'Escape' && sidePanel && sidePanel.classList.contains("open")) {
-        if (btnClosePanel) btnClosePanel.click();
+    if (e.key === 'Escape') {
+        if (sidePanel && sidePanel.classList.contains("open") && btnClosePanel) btnClosePanel.click();
+        if (projectModal) projectModal.style.display = "none";
+        if (archivedModal) archivedModal.style.display = "none";
     }
 });
 
+// --- SIDEBAR Y MODO OSCURO ---
 const toggleSidebarBtn = document.getElementById('toggle-sidebar');
 const sidebar = document.getElementById('sidebar');
 
@@ -386,53 +664,16 @@ if (toggleSidebarBtn && sidebar) {
     });
 }
 
-const sidebarNewTicketBtn = document.getElementById("sidebar-new-ticket");
-if (sidebarNewTicketBtn && sidePanel) {
-    sidebarNewTicketBtn.addEventListener("click", () => {
-        document.getElementById("panel-title").textContent = "Nuevo Ticket";
-        sidePanel.classList.add("open");
-        setTimeout(() => document.getElementById("ticket-title").focus(), 300);
-    });
-}
-
-async function loadProjects() {
-    try {
-        const res = await fetch(`${API_BASE}/projects`);
-        const projects = await res.json();
-        const projectList = document.getElementById("project-list");
-        if(!projectList) return;
-        
-        projectList.innerHTML = "";
-        projects.forEach(p => {
-            const a = document.createElement("a");
-            a.className = "nav-item project-link";
-            a.href = "#";
-            a.innerHTML = `<span class="project-color" style="background-color: ${p.color};"></span> <span class="text">${p.name}</span>`;
-            
-            a.addEventListener("click", (e) => {
-                e.preventDefault();
-                document.querySelectorAll(".project-link").forEach(el => el.classList.remove("active"));
-                a.classList.add("active");
-                currentProjectId = p.id;
-                document.getElementById("board-title").textContent = p.name;
-                fetchAndRenderTickets();
-            });
-            
-            projectList.appendChild(a);
-        });
-    } catch (e) {
-        console.error("Error cargando proyectos:", e);
-    }
-}
-
 const themeToggleBtn = document.getElementById("theme-toggle");
 if (themeToggleBtn) {
     themeToggleBtn.addEventListener("click", () => {
         const currentTheme = document.documentElement.getAttribute("data-theme");
         if (currentTheme === "dark") {
             document.documentElement.removeAttribute("data-theme");
+            themeToggleBtn.textContent = "🌙";
         } else {
             document.documentElement.setAttribute("data-theme", "dark");
+            themeToggleBtn.textContent = "☀️";
         }
     });
 }

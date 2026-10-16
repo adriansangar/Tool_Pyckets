@@ -12,6 +12,7 @@ class Project(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str
     color: str = "#ff5630"
+    is_archived: bool = Field(default=False)
 
 class Epic(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)

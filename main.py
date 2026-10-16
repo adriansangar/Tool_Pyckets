@@ -32,14 +32,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-class TicketCreate(BaseModel):
-    title: str
-    description: Optional[str] = None
-    status: str = "todo"
-    epic_id: Optional[int] = None
-    project_id: Optional[int] = None
-    release: Optional[str] = None
-    tags: List[str] = []
+class ProjectCreate(BaseModel):
+    name: str
+    color: str = "#ff5630"
 
 class StatusUpdate(BaseModel):
     status: str
@@ -49,8 +44,57 @@ def get_columns(session: Session = Depends(get_session)):
     return session.exec(select(Column).order_by(Column.order)).all()
 
 @app.get("/api/projects", response_model=List[Project])
-def get_projects(session: Session = Depends(get_session)):
-    return session.exec(select(Project)).all()
+def get_projects(include_archived: bool = False, session: Session = Depends(get_session)):
+    projects = session.exec(select(Project)).all()
+    if not include_archived:
+        return [p for p in projects if not p.is_archived]
+    return projects
+
+@app.post("/api/projects", response_model=Project)
+def create_project(project: ProjectCreate, session: Session = Depends(get_session)):
+    db_project = Project(name=project.name, color=project.color, is_archived=False)
+    session.add(db_project)
+    session.commit()
+    session.refresh(db_project)
+    return db_project
+
+@app.put("/api/projects/{project_id}/archive", response_model=Project)
+def archive_project(project_id: int, session: Session = Depends(get_session)):
+    db_project = session.get(Project, project_id)
+    if not db_project:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    
+    db_project.is_archived = True
+    session.add(db_project)
+    session.commit()
+    session.refresh(db_project)
+    return db_project
+
+@app.put("/api/projects/{project_id}/unarchive", response_model=Project)
+def unarchive_project(project_id: int, session: Session = Depends(get_session)):
+    db_project = session.get(Project, project_id)
+    if not db_project:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    
+    db_project.is_archived = False
+    session.add(db_project)
+    session.commit()
+    session.refresh(db_project)
+    return db_project
+
+@app.delete("/api/projects/{project_id}")
+def delete_project(project_id: int, session: Session = Depends(get_session)):
+    db_project = session.get(Project, project_id)
+    if not db_project:
+        raise HTTPException(status_code=404, detail="Proyecto no encontrado")
+    
+    tickets = session.exec(select(Ticket).where(Ticket.project_id == project_id)).all()
+    for t in tickets:
+        session.delete(t)
+        
+    session.delete(db_project)
+    session.commit()
+    return {"message": "Proyecto eliminado"}
 
 @app.get("/api/epics", response_model=List[Epic])
 def get_epics(session: Session = Depends(get_session)):
