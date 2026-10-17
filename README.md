@@ -62,5 +62,5 @@ Evolución del frontend hacia una experiencia de alto rendimiento (inspiración 
 - [x] **Estructura Multi-Tablero:** Refactorización de `models.py` para crear la entidad `Project` y vincular mediante llaves foráneas los tickets y columnas a proyectos específicos.
 - [x] **Layout con Barra Lateral (Sidebar):** Implementación de un menú lateral colapsable para crear, organizar y alternar entre distintos tableros al instante.
 - [x] **Dark Mode Profesional:** Rediseño total de la paleta CSS usando variables dinámicas para un tema oscuro de alto contraste (grises profundos, bordes sutiles y acentos de color).
-- [ ] **Filtros Inteligentes (Omnibar):** Evolución del buscador superior hacia una barra de comandos avanzada capaz de interpretar queries compuestas (ej. `is:bug @adrian`).
+- [x] **Filtros Inteligentes (Omnibar):** Evolución del buscador superior hacia una barra de comandos avanzada capaz de interpretar queries compuestas (ej. `is:bug @adrian`).
 - [ ] **Tableros Customizables:** Lógica en el frontend y backend para permitir añadir, renombrar, colorear y reordenar columnas de forma independiente para cada proyecto.

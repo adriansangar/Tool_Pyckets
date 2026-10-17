@@ -56,7 +56,10 @@
             <header>
                 <h1 id="board-title" style="font-size: 1.2rem; margin: 0;">Todos los Tickets</h1> 
                 <div class="controls">
-                    <input type="text" id="search-filter" class="filter-input" placeholder="Filtrar por título o #tag..." autocomplete="off">
+                    <div class="search-container">
+                        <input type="text" id="search-filter" class="filter-input" style="width: 320px;" placeholder='Filtrar: @adrian, #bug, is:done, epic:"Core"...' autocomplete="off">
+                        <div id="omnibar-suggestions" class="suggestions-dropdown" style="display: none;"></div>
+                    </div>
                     <button id="toggle-view" class="btn">Vista Lista</button>
                     <button id="header-new-ticket" class="btn primary" style="display: none;">+ Nuevo Ticket</button>
                     <button id="theme-toggle" class="icon-btn" title="Cambiar tema (Modo Oscuro/Claro)" style="font-size: 1.2rem; padding: 4px 8px;">🌙</button>

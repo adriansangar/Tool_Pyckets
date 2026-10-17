@@ -12,6 +12,7 @@ const searchInput = document.getElementById("search-filter");
 
 let isListView = false;
 let globalColumns = [];
+let rawTickets = []; // Guardamos copia en memoria de los tickets sin filtrar
 let currentProjectId = null;
 
 // --- INIT: Carga inicial ---
@@ -29,16 +30,100 @@ async function fetchAndRenderTickets() {
         ]);
 
         globalColumns = await columnsRes.json();
-        const tickets = await ticketsRes.json();
+        rawTickets = await ticketsRes.json();
 
-        renderColumns(globalColumns);
-        renderTickets(tickets);
-        renderTableTickets(tickets, true);
-        renderQuickFilters(tickets);
+        applyOmnibarFilter();
+        renderQuickFilters(rawTickets);
         setupDragAndDrop();
     } catch (error) {
         console.error("Error crítico cargando el tablero:", error);
     }
+}
+
+// --- PARSER DE LA OMNIBAR INTELIGENTE ---
+function filterTicketsByOmnibar(tickets, queryStr) {
+    if (!queryStr || !queryStr.trim()) return tickets;
+
+    let query = queryStr.trim();
+
+    // 1. Extraer tokens de estado: is:done, is:todo, is:in_progress, status:done
+    const statusMatches = [...query.matchAll(/(?:is|status):([\w_]+)/gi)];
+    const statuses = statusMatches.map(m => m[1].toLowerCase());
+    query = query.replace(/(?:is|status):([\w_]+)/gi, '').trim();
+
+    // 2. Extraer tokens de asignado: @adrian o assignee:adrian
+    const assigneeMatches = [...query.matchAll(/(?:@|assignee:)(\w+)/gi)];
+    const assignees = assigneeMatches.map(m => m[1].toLowerCase());
+    query = query.replace(/(?:@|assignee:)(\w+)/gi, '').trim();
+
+    // 3. Extraer tokens de etiqueta: #bug o tag:backend
+    const tagMatches = [...query.matchAll(/(?:#|tag:)(\w+)/gi)];
+    const tags = tagMatches.map(m => m[1].toLowerCase());
+    query = query.replace(/(?:#|tag:)(\w+)/gi, '').trim();
+
+    // 4. Extraer tokens de Epic: epic:"Core Engine" o epic:core
+    const epicMatches = [...query.matchAll(/epic:(?:"([^"]+)"|(\w+))/gi)];
+    const epics = epicMatches.map(m => (m[1] || m[2]).toLowerCase());
+    query = query.replace(/epic:(?:"([^"]+)"|(\w+))/gi, '').trim();
+
+    // 5. Texto libre restante
+    const textSearch = query.toLowerCase().trim();
+
+    return tickets.filter(ticket => {
+        // Validación de Estado
+        if (statuses.length > 0) {
+            const ticketStatus = (ticket.status || 'todo').toLowerCase();
+            const matchesStatus = statuses.some(s => 
+                ticketStatus.includes(s) || 
+                (s === 'todo' && ticketStatus === 'todo') || 
+                (s === 'progress' && ticketStatus === 'in_progress')
+            );
+            if (!matchesStatus) return false;
+        }
+
+        // Validación de Asignado
+        if (assignees.length > 0) {
+            const ticketAssignee = (ticket.assignee || '').toLowerCase();
+            if (!assignees.some(a => ticketAssignee.includes(a))) return false;
+        }
+
+        // Validación de Etiquetas
+        if (tags.length > 0) {
+            const ticketTags = (ticket.tags || []).map(t => t.toLowerCase());
+            if (!tags.some(t => ticketTags.includes(t))) return false;
+        }
+
+        // Validación de Epic
+        if (epics.length > 0) {
+            const ticketEpic = (ticket.epic || '').toLowerCase();
+            if (!epics.some(e => ticketEpic.includes(e))) return false;
+        }
+
+        // Búsqueda de Texto Plano en Título o Descripción
+        if (textSearch) {
+            const titleMatch = (ticket.title || '').toLowerCase().includes(textSearch);
+            const descMatch = (ticket.description || '').toLowerCase().includes(textSearch);
+            if (!titleMatch && !descMatch) return false;
+        }
+
+        return true;
+    });
+}
+
+function applyOmnibarFilter() {
+    const query = searchInput ? searchInput.value : '';
+    const filteredTickets = filterTicketsByOmnibar(rawTickets, query);
+    
+    renderColumns(globalColumns);
+    renderTickets(filteredTickets);
+    renderTableTickets(filteredTickets, true);
+}
+
+// Búsqueda reactiva en tiempo real al escribir
+if (searchInput) {
+    searchInput.addEventListener("input", () => {
+        applyOmnibarFilter();
+    });
 }
 
 // --- NAVEGACIÓN Y VISTAS GLOBALES ---
@@ -92,17 +177,8 @@ if (navGlobalMine) {
             document.getElementById("list-container").style.display = "none";
         }
         
-        try {
-            const res = await fetch(`${API_BASE}/tickets`);
-            const allTickets = await res.json();
-            const myTickets = allTickets.filter(t => t.assignee && t.assignee.toLowerCase() === 'adrian');
-            
-            renderColumns(globalColumns);
-            renderTickets(myTickets);
-            renderTableTickets(myTickets, true);
-        } catch (error) {
-            console.error("Error filtrando mis tickets:", error);
-        }
+        if (searchInput) searchInput.value = "@adrian";
+        fetchAndRenderTickets();
     });
 }
 
@@ -277,7 +353,7 @@ function renderQuickFilters(tickets) {
     allTags.forEach(tag => {
         const btn = document.createElement("button");
         btn.className = "filter-pill";
-        btn.dataset.filter = tag.toLowerCase();
+        btn.dataset.filter = `#${tag.toLowerCase()}`;
         btn.textContent = `#${tag}`;
         filtersBar.appendChild(btn);
     });
@@ -289,20 +365,8 @@ function renderQuickFilters(tickets) {
 
             if (searchInput) {
                 searchInput.value = e.target.dataset.filter;
-                searchInput.dispatchEvent(new Event('input'));
+                applyOmnibarFilter();
             }
-        });
-    });
-}
-
-if (searchInput) {
-    searchInput.addEventListener("input", (e) => {
-        const term = e.target.value.toLowerCase();
-        document.querySelectorAll(".ticket-card").forEach(card => {
-            card.style.display = card.textContent.toLowerCase().includes(term) ? "flex" : "none";
-        });
-        document.querySelectorAll("#ticket-list-body tr").forEach(row => {
-            row.style.display = row.textContent.toLowerCase().includes(term) ? "table-row" : "none";
         });
     });
 }
@@ -677,5 +741,167 @@ if (themeToggleBtn) {
         }
     });
 }
+
+// --- LÓGICA DE AUTOCOMPLETADO OMNIBAR ---
+const suggestionsContainer = document.getElementById("omnibar-suggestions");
+let activeSuggestionIndex = -1;
+
+function getOmnibarSuggestions(currentWord) {
+    const word = currentWord.toLowerCase();
+    let options = [];
+
+    // 1. Asignados (@...)
+    if (word.startsWith("@")) {
+        const query = word.slice(1);
+        const assignees = [...new Set(rawTickets.map(t => t.assignee).filter(Boolean))];
+        options = assignees
+            .filter(a => a.toLowerCase().includes(query))
+            .map(a => ({ value: `@${a}`, label: `@${a}`, type: "Asignado" }));
+    } 
+    // 2. Etiquetas (#...)
+    else if (word.startsWith("#")) {
+        const query = word.slice(1);
+        const tags = [...new Set(rawTickets.flatMap(t => t.tags || []))];
+        options = tags
+            .filter(t => t.toLowerCase().includes(query))
+            .map(t => ({ value: `#${t}`, label: `#${t}`, type: "Etiqueta" }));
+    } 
+    // 3. Estados (is:...)
+    else if (word.startsWith("is:") || word.startsWith("status:")) {
+        const prefix = word.startsWith("is:") ? "is:" : "status:";
+        const query = word.slice(prefix.length);
+        const statuses = ["todo", "in_progress", "done"];
+        options = statuses
+            .filter(s => s.includes(query))
+            .map(s => ({ value: `${prefix}${s}`, label: `${prefix}${s}`, type: "Estado" }));
+    } 
+    // 4. Epics (epic:...)
+    else if (word.startsWith("epic:")) {
+        const query = word.slice(5).replace(/"/g, '');
+        const epics = [...new Set(rawTickets.map(t => t.epic).filter(Boolean))];
+        options = epics
+            .filter(e => e.toLowerCase().includes(query))
+            .map(e => ({ 
+                value: e.includes(" ") ? `epic:"${e}"` : `epic:${e}`, 
+                label: `epic:${e}`, 
+                type: "Epic" 
+            }));
+    }
+    // 5. Sugerencias por defecto si está empezando a escribir
+    else if (word === "") {
+        options = [
+            { value: "@", label: "@asignado", type: "Filtro" },
+            { value: "#", label: "#etiqueta", type: "Filtro" },
+            { value: "is:", label: "is:estado", type: "Filtro" },
+            { value: "epic:", label: "epic:nombre", type: "Filtro" }
+        ];
+    }
+
+    return options;
+}
+
+function showOmnibarSuggestions() {
+    if (!searchInput || !suggestionsContainer) return;
+
+    const cursorPos = searchInput.selectionStart;
+    const textBeforeCursor = searchInput.value.slice(0, cursorPos);
+    const words = textBeforeCursor.split(/\s+/);
+    const currentWord = words[words.length - 1];
+
+    const suggestions = getOmnibarSuggestions(currentWord);
+
+    if (suggestions.length === 0) {
+        suggestionsContainer.style.display = "none";
+        activeSuggestionIndex = -1;
+        return;
+    }
+
+    activeSuggestionIndex = 0;
+    suggestionsContainer.innerHTML = suggestions.map((item, index) => `
+        <div class="suggestion-item ${index === 0 ? 'selected' : ''}" data-value="${item.value}">
+            <span>${item.label}</span>
+            <span class="suggestion-badge">${item.type}</span>
+        </div>
+    `).join("");
+
+    suggestionsContainer.style.display = "block";
+
+    // Clic en sugerencia
+    suggestionsContainer.querySelectorAll(".suggestion-item").forEach(item => {
+        item.addEventListener("click", () => applySuggestion(item.dataset.value));
+    });
+}
+
+function applySuggestion(selectedValue) {
+    const cursorPos = searchInput.selectionStart;
+    const text = searchInput.value;
+    const textBeforeCursor = text.slice(0, cursorPos);
+    const textAfterCursor = text.slice(cursorPos);
+    
+    const words = textBeforeCursor.split(/\s+/);
+    words[words.length - 1] = selectedValue;
+
+    const newTextBefore = words.join(" ") + " ";
+    searchInput.value = newTextBefore + textAfterCursor;
+    
+    // Posicionar cursor tras la inserción
+    const newCursorPos = newTextBefore.length;
+    searchInput.setSelectionRange(newCursorPos, newCursorPos);
+    
+    suggestionsContainer.style.display = "none";
+    searchInput.focus();
+    applyOmnibarFilter();
+}
+
+// Eventos del Input
+if (searchInput) {
+    searchInput.addEventListener("input", () => {
+        showOmnibarSuggestions();
+    });
+
+    searchInput.addEventListener("focus", () => {
+        showOmnibarSuggestions();
+    });
+
+    searchInput.addEventListener("keydown", (e) => {
+        if (!suggestionsContainer || suggestionsContainer.style.display === "none") return;
+
+        const items = suggestionsContainer.querySelectorAll(".suggestion-item");
+        if (items.length === 0) return;
+
+        if (e.key === "ArrowDown") {
+            e.preventDefault();
+            activeSuggestionIndex = (activeSuggestionIndex + 1) % items.length;
+            updateSelectedSuggestion(items);
+        } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            activeSuggestionIndex = (activeSuggestionIndex - 1 + items.length) % items.length;
+            updateSelectedSuggestion(items);
+        } else if (e.key === "Enter" || e.key === "Tab") {
+            if (activeSuggestionIndex >= 0 && items[activeSuggestionIndex]) {
+                e.preventDefault();
+                applySuggestion(items[activeSuggestionIndex].dataset.value);
+            }
+        } else if (e.key === "Escape") {
+            suggestionsContainer.style.display = "none";
+        }
+    });
+}
+
+function updateSelectedSuggestion(items) {
+    items.forEach((item, index) => {
+        item.classList.toggle("selected", index === activeSuggestionIndex);
+        if (index === activeSuggestionIndex) {
+            item.scrollIntoView({ block: "nearest" });
+        }
+    });
+}
+
+// Cerrar desplegable si se hace clic fuera
+document.addEventListener("click", (e) => {
+    if (suggestionsContainer && !e.target.closest(".search-container")) {
+        suggestionsContainer.style.display = "none";
+    }
+});
 
 document.addEventListener("DOMContentLoaded", initBoard);
