@@ -384,3 +384,43 @@ header {
     padding: 2px 6px;
     border-radius: 4px;
 }
+
+/* --- GESTIÓN DE COLUMNAS --- */
+.column-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.column-actions {
+    display: flex;
+    gap: 4px;
+    opacity: 0;
+    transition: var(--transition);
+}
+
+.kanban-column:hover .column-actions {
+    opacity: 1;
+}
+
+.add-column-card {
+    min-width: 280px;
+    max-width: 280px;
+    background-color: transparent;
+    border: 2px dashed var(--sidebar-border);
+    border-radius: var(--radius-col);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 1.5rem;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-weight: 600;
+    transition: var(--transition);
+}
+
+.add-column-card:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+    background-color: var(--sidebar-hover);
+}

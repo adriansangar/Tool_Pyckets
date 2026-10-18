@@ -39,10 +39,12 @@ class ProjectCreate(BaseModel):
 class StatusUpdate(BaseModel):
     status: str
 
+# --- ENDPOINT COLUMNAS FIJAS ---
 @app.get("/api/columns", response_model=List[Column])
 def get_columns(session: Session = Depends(get_session)):
     return session.exec(select(Column).order_by(Column.order)).all()
 
+# --- ENDPOINTS PROYECTOS ---
 @app.get("/api/projects", response_model=List[Project])
 def get_projects(include_archived: bool = False, session: Session = Depends(get_session)):
     projects = session.exec(select(Project)).all()
@@ -63,7 +65,6 @@ def archive_project(project_id: int, session: Session = Depends(get_session)):
     db_project = session.get(Project, project_id)
     if not db_project:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
-    
     db_project.is_archived = True
     session.add(db_project)
     session.commit()
@@ -75,7 +76,6 @@ def unarchive_project(project_id: int, session: Session = Depends(get_session)):
     db_project = session.get(Project, project_id)
     if not db_project:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
-    
     db_project.is_archived = False
     session.add(db_project)
     session.commit()
@@ -91,11 +91,12 @@ def delete_project(project_id: int, session: Session = Depends(get_session)):
     tickets = session.exec(select(Ticket).where(Ticket.project_id == project_id)).all()
     for t in tickets:
         session.delete(t)
-        
+
     session.delete(db_project)
     session.commit()
     return {"message": "Proyecto eliminado"}
 
+# --- ENDPOINTS TICKETS Y EPICS ---
 @app.get("/api/epics", response_model=List[Epic])
 def get_epics(session: Session = Depends(get_session)):
     return session.exec(select(Epic)).all()

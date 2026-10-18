@@ -9,13 +9,15 @@ const navGlobalMine = document.getElementById("nav-global-mine");
 const headerNewTicketBtn = document.getElementById("header-new-ticket");
 const focusSearchBtn = document.getElementById("focus-search");
 const searchInput = document.getElementById("search-filter");
+const suggestionsContainer = document.getElementById("omnibar-suggestions");
 
 let isListView = false;
 let globalColumns = [];
-let rawTickets = []; // Guardamos copia en memoria de los tickets sin filtrar
+let rawTickets = [];
 let currentProjectId = null;
+let activeSuggestionIndex = -1;
 
-// --- INIT: Carga inicial ---
+// --- INIT ---
 async function initBoard() {
     await loadProjects();
     await fetchAndRenderTickets();
@@ -23,10 +25,11 @@ async function initBoard() {
 
 async function fetchAndRenderTickets() {
     try {
-        const url = currentProjectId ? `${API_BASE}/tickets?project_id=${currentProjectId}` : `${API_BASE}/tickets`;
+        const ticketUrl = currentProjectId ? `${API_BASE}/tickets?project_id=${currentProjectId}` : `${API_BASE}/tickets`;
+        
         const [columnsRes, ticketsRes] = await Promise.all([
             fetch(`${API_BASE}/columns`),
-            fetch(url)
+            fetch(ticketUrl)
         ]);
 
         globalColumns = await columnsRes.json();
@@ -40,66 +43,56 @@ async function fetchAndRenderTickets() {
     }
 }
 
-// --- PARSER DE LA OMNIBAR INTELIGENTE ---
+// --- PARSER OMNIBAR Y FILTRADO ---
 function filterTicketsByOmnibar(tickets, queryStr) {
     if (!queryStr || !queryStr.trim()) return tickets;
 
     let query = queryStr.trim();
 
-    // 1. Extraer tokens de estado: is:done, is:todo, is:in_progress, status:done
     const statusMatches = [...query.matchAll(/(?:is|status):([\w_]+)/gi)];
     const statuses = statusMatches.map(m => m[1].toLowerCase());
     query = query.replace(/(?:is|status):([\w_]+)/gi, '').trim();
 
-    // 2. Extraer tokens de asignado: @adrian o assignee:adrian
     const assigneeMatches = [...query.matchAll(/(?:@|assignee:)(\w+)/gi)];
     const assignees = assigneeMatches.map(m => m[1].toLowerCase());
     query = query.replace(/(?:@|assignee:)(\w+)/gi, '').trim();
 
-    // 3. Extraer tokens de etiqueta: #bug o tag:backend
     const tagMatches = [...query.matchAll(/(?:#|tag:)(\w+)/gi)];
     const tags = tagMatches.map(m => m[1].toLowerCase());
     query = query.replace(/(?:#|tag:)(\w+)/gi, '').trim();
 
-    // 4. Extraer tokens de Epic: epic:"Core Engine" o epic:core
     const epicMatches = [...query.matchAll(/epic:(?:"([^"]+)"|(\w+))/gi)];
     const epics = epicMatches.map(m => (m[1] || m[2]).toLowerCase());
     query = query.replace(/epic:(?:"([^"]+)"|(\w+))/gi, '').trim();
 
-    // 5. Texto libre restante
     const textSearch = query.toLowerCase().trim();
 
     return tickets.filter(ticket => {
-        // Validación de Estado
         if (statuses.length > 0) {
             const ticketStatus = (ticket.status || 'todo').toLowerCase();
             const matchesStatus = statuses.some(s => 
-                ticketStatus.includes(s) || 
-                (s === 'todo' && ticketStatus === 'todo') || 
+                ticketStatus === s || 
+                ticketStatus.includes(s) ||
                 (s === 'progress' && ticketStatus === 'in_progress')
             );
             if (!matchesStatus) return false;
         }
 
-        // Validación de Asignado
         if (assignees.length > 0) {
             const ticketAssignee = (ticket.assignee || '').toLowerCase();
             if (!assignees.some(a => ticketAssignee.includes(a))) return false;
         }
 
-        // Validación de Etiquetas
         if (tags.length > 0) {
             const ticketTags = (ticket.tags || []).map(t => t.toLowerCase());
             if (!tags.some(t => ticketTags.includes(t))) return false;
         }
 
-        // Validación de Epic
         if (epics.length > 0) {
             const ticketEpic = (ticket.epic || '').toLowerCase();
             if (!epics.some(e => ticketEpic.includes(e))) return false;
         }
 
-        // Búsqueda de Texto Plano en Título o Descripción
         if (textSearch) {
             const titleMatch = (ticket.title || '').toLowerCase().includes(textSearch);
             const descMatch = (ticket.description || '').toLowerCase().includes(textSearch);
@@ -119,12 +112,150 @@ function applyOmnibarFilter() {
     renderTableTickets(filteredTickets, true);
 }
 
-// Búsqueda reactiva en tiempo real al escribir
+// --- SUGERENCIAS AUTOCOMPLETADO OMNIBAR ---
+function getOmnibarSuggestions(currentWord) {
+    const word = currentWord.toLowerCase();
+    let options = [];
+
+    if (word.startsWith("@")) {
+        const query = word.slice(1);
+        const assignees = [...new Set(rawTickets.map(t => t.assignee).filter(Boolean))];
+        options = assignees
+            .filter(a => a.toLowerCase().includes(query))
+            .map(a => ({ value: `@${a}`, label: `@${a}`, type: "Asignado" }));
+    } else if (word.startsWith("#")) {
+        const query = word.slice(1);
+        const tags = [...new Set(rawTickets.flatMap(t => t.tags || []))];
+        options = tags
+            .filter(t => t.toLowerCase().includes(query))
+            .map(t => ({ value: `#${t}`, label: `#${t}`, type: "Etiqueta" }));
+    } else if (word.startsWith("is:") || word.startsWith("status:")) {
+        const prefix = word.startsWith("is:") ? "is:" : "status:";
+        const query = word.slice(prefix.length);
+        const statuses = ["todo", "halted", "in_progress", "done"];
+        options = statuses
+            .filter(s => s.includes(query))
+            .map(s => ({ value: `${prefix}${s}`, label: `${prefix}${s}`, type: "Estado" }));
+    } else if (word.startsWith("epic:")) {
+        const query = word.slice(5).replace(/"/g, '');
+        const epics = [...new Set(rawTickets.map(t => t.epic).filter(Boolean))];
+        options = epics
+            .filter(e => e.toLowerCase().includes(query))
+            .map(e => ({ 
+                value: e.includes(" ") ? `epic:"${e}"` : `epic:${e}`, 
+                label: `epic:${e}`, 
+                type: "Epic" 
+            }));
+    } else if (word === "") {
+        options = [
+            { value: "@", label: "@asignado", type: "Filtro" },
+            { value: "#", label: "#etiqueta", type: "Filtro" },
+            { value: "is:", label: "is:estado", type: "Filtro" },
+            { value: "epic:", label: "epic:nombre", type: "Filtro" }
+        ];
+    }
+
+    return options;
+}
+
+function showOmnibarSuggestions() {
+    if (!searchInput || !suggestionsContainer) return;
+
+    const cursorPos = searchInput.selectionStart;
+    const textBeforeCursor = searchInput.value.slice(0, cursorPos);
+    const words = textBeforeCursor.split(/\s+/);
+    const currentWord = words[words.length - 1];
+
+    const suggestions = getOmnibarSuggestions(currentWord);
+
+    if (suggestions.length === 0) {
+        suggestionsContainer.style.display = "none";
+        activeSuggestionIndex = -1;
+        return;
+    }
+
+    activeSuggestionIndex = 0;
+    suggestionsContainer.innerHTML = suggestions.map((item, index) => `
+        <div class="suggestion-item ${index === 0 ? 'selected' : ''}" data-value="${item.value}">
+            <span>${item.label}</span>
+            <span class="suggestion-badge">${item.type}</span>
+        </div>
+    `).join("");
+
+    suggestionsContainer.style.display = "block";
+
+    suggestionsContainer.querySelectorAll(".suggestion-item").forEach(item => {
+        item.addEventListener("click", () => applySuggestion(item.dataset.value));
+    });
+}
+
+function applySuggestion(selectedValue) {
+    const cursorPos = searchInput.selectionStart;
+    const text = searchInput.value;
+    const textBeforeCursor = text.slice(0, cursorPos);
+    const textAfterCursor = text.slice(cursorPos);
+    
+    const words = textBeforeCursor.split(/\s+/);
+    words[words.length - 1] = selectedValue;
+
+    const newTextBefore = words.join(" ") + " ";
+    searchInput.value = newTextBefore + textAfterCursor;
+    
+    const newCursorPos = newTextBefore.length;
+    searchInput.setSelectionRange(newCursorPos, newCursorPos);
+    
+    suggestionsContainer.style.display = "none";
+    searchInput.focus();
+    applyOmnibarFilter();
+}
+
 if (searchInput) {
     searchInput.addEventListener("input", () => {
         applyOmnibarFilter();
+        showOmnibarSuggestions();
+    });
+
+    searchInput.addEventListener("focus", () => showOmnibarSuggestions());
+
+    searchInput.addEventListener("keydown", (e) => {
+        if (!suggestionsContainer || suggestionsContainer.style.display === "none") return;
+
+        const items = suggestionsContainer.querySelectorAll(".suggestion-item");
+        if (items.length === 0) return;
+
+        if (e.key === "ArrowDown") {
+            e.preventDefault();
+            activeSuggestionIndex = (activeSuggestionIndex + 1) % items.length;
+            updateSelectedSuggestion(items);
+        } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            activeSuggestionIndex = (activeSuggestionIndex - 1 + items.length) % items.length;
+            updateSelectedSuggestion(items);
+        } else if (e.key === "Enter" || e.key === "Tab") {
+            if (activeSuggestionIndex >= 0 && items[activeSuggestionIndex]) {
+                e.preventDefault();
+                applySuggestion(items[activeSuggestionIndex].dataset.value);
+            }
+        } else if (e.key === "Escape") {
+            suggestionsContainer.style.display = "none";
+        }
     });
 }
+
+function updateSelectedSuggestion(items) {
+    items.forEach((item, index) => {
+        item.classList.toggle("selected", index === activeSuggestionIndex);
+        if (index === activeSuggestionIndex) {
+            item.scrollIntoView({ block: "nearest" });
+        }
+    });
+}
+
+document.addEventListener("click", (e) => {
+    if (suggestionsContainer && !e.target.closest(".search-container")) {
+        suggestionsContainer.style.display = "none";
+    }
+});
 
 // --- NAVEGACIÓN Y VISTAS GLOBALES ---
 if (focusSearchBtn && searchInput) {
@@ -182,7 +313,7 @@ if (navGlobalMine) {
     });
 }
 
-// --- CARGA DINÁMICA DE PROYECTOS ---
+// --- CARGA DE PROYECTOS ---
 async function loadProjects() {
     try {
         const res = await fetch(`${API_BASE}/projects`);
@@ -233,7 +364,6 @@ async function loadProjects() {
 if (btnToggleView) {
     btnToggleView.addEventListener("click", () => {
         isListView = !isListView;
-        
         const home = document.getElementById("project-home");
         if (home && home.style.display !== "none") return;
 
@@ -249,16 +379,20 @@ if (btnToggleView) {
     });
 }
 
-// --- RENDERIZADO ---
+// --- RENDERIZADO TABLERO FIJO ---
 function renderColumns(columns) {
     if (!boardContainer) return;
     boardContainer.innerHTML = "";
+    
     columns.forEach(col => {
-        const statusId = col.name.toLowerCase().replace(/\s+/g, '_').replace('to_do', 'todo');
+        const statusId = col.name.toLowerCase().replace(/\s+/g, '_');
         const colDiv = document.createElement("div");
         colDiv.className = "kanban-column";
+
         colDiv.innerHTML = `
-            <div class="column-header">${col.name}</div>
+            <div class="column-header">
+                <span>${col.name}</span>
+            </div>
             <div class="column-content" data-status="${statusId}" id="col-${statusId}"></div>
         `;
         boardContainer.appendChild(colDiv);
@@ -308,7 +442,7 @@ function renderTableTickets(tickets, clearTable = false) {
         const currentStatus = ticket.status || "todo";
 
         const optionsHtml = globalColumns.map(col => {
-            const statusId = col.name.toLowerCase().replace(/\s+/g, '_').replace('to_do', 'todo');
+            const statusId = col.name.toLowerCase().replace(/\s+/g, '_');
             const isSelected = (currentStatus === statusId) ? "selected" : "";
             return `<option value="${statusId}" ${isSelected}>${col.name}</option>`;
         }).join("");
@@ -371,6 +505,7 @@ function renderQuickFilters(tickets) {
     });
 }
 
+// --- DRAG & DROP Y ESTADOS ---
 async function syncTicketStatus(ticketId, newStatus) {
     await updateTicketStatus(ticketId, newStatus);
     const ticketCard = document.querySelector(`.ticket-card[data-id="${ticketId}"]`);
@@ -433,6 +568,7 @@ function setupDragAndDrop() {
     });
 }
 
+// --- PANEL LATERAL TICKET ---
 const sidePanel = document.getElementById("side-panel");
 const btnClosePanel = document.getElementById("close-panel");
 const btnCancel = document.getElementById("cancel-ticket");
@@ -536,7 +672,7 @@ async function openEditPanel(ticketId) {
     }
 }
 
-// --- IR AL TABLERO KANBAN ---
+// --- OTROS NAVEGADORES Y EVENTOS ---
 const btnGoBoard = document.getElementById("btn-go-board");
 if (btnGoBoard) {
     btnGoBoard.addEventListener("click", () => {
@@ -552,7 +688,6 @@ if (btnGoBoard) {
     });
 }
 
-// --- ARCHIVAR PROYECTO ACTUAL ---
 const btnArchiveProject = document.getElementById("btn-archive-project");
 if (btnArchiveProject) {
     btnArchiveProject.addEventListener("click", async () => {
@@ -561,9 +696,7 @@ if (btnArchiveProject) {
         const confirmArchive = confirm("¿Seguro que quieres archivar este proyecto?");
         if (confirmArchive) {
             try {
-                const res = await fetch(`${API_BASE}/projects/${currentProjectId}/archive`, {
-                    method: 'PUT'
-                });
+                const res = await fetch(`${API_BASE}/projects/${currentProjectId}/archive`, { method: 'PUT' });
                 if (res.ok) {
                     currentProjectId = null;
                     await loadProjects();
@@ -576,7 +709,6 @@ if (btnArchiveProject) {
     });
 }
 
-// --- MODAL CREAR PROYECTO ---
 const projectModal = document.getElementById("project-modal");
 const btnOpenCreateProject = document.getElementById("btn-open-create-project");
 const btnCloseProjectModal = document.getElementById("close-project-modal");
@@ -608,7 +740,6 @@ if (projectForm) {
     });
 }
 
-// --- MODAL PROYECTOS ARCHIVADOS Y ACCIONES ---
 const archivedModal = document.getElementById("archived-projects-modal");
 const navArchivedProjects = document.getElementById("nav-archived-projects");
 const closeArchivedModal = document.getElementById("close-archived-modal");
@@ -686,7 +817,7 @@ window.deleteProjectPermanently = async function(projectId) {
     }
 };
 
-// --- ATAJOS DE TECLADO ---
+// --- ATAJOS Y MODO OSCURO ---
 document.addEventListener("keydown", (e) => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
         if (e.key === 'Escape' && sidePanel && sidePanel.classList.contains("open")) {
@@ -718,7 +849,6 @@ document.addEventListener("keydown", (e) => {
     }
 });
 
-// --- SIDEBAR Y MODO OSCURO ---
 const toggleSidebarBtn = document.getElementById('toggle-sidebar');
 const sidebar = document.getElementById('sidebar');
 
@@ -741,167 +871,5 @@ if (themeToggleBtn) {
         }
     });
 }
-
-// --- LÓGICA DE AUTOCOMPLETADO OMNIBAR ---
-const suggestionsContainer = document.getElementById("omnibar-suggestions");
-let activeSuggestionIndex = -1;
-
-function getOmnibarSuggestions(currentWord) {
-    const word = currentWord.toLowerCase();
-    let options = [];
-
-    // 1. Asignados (@...)
-    if (word.startsWith("@")) {
-        const query = word.slice(1);
-        const assignees = [...new Set(rawTickets.map(t => t.assignee).filter(Boolean))];
-        options = assignees
-            .filter(a => a.toLowerCase().includes(query))
-            .map(a => ({ value: `@${a}`, label: `@${a}`, type: "Asignado" }));
-    } 
-    // 2. Etiquetas (#...)
-    else if (word.startsWith("#")) {
-        const query = word.slice(1);
-        const tags = [...new Set(rawTickets.flatMap(t => t.tags || []))];
-        options = tags
-            .filter(t => t.toLowerCase().includes(query))
-            .map(t => ({ value: `#${t}`, label: `#${t}`, type: "Etiqueta" }));
-    } 
-    // 3. Estados (is:...)
-    else if (word.startsWith("is:") || word.startsWith("status:")) {
-        const prefix = word.startsWith("is:") ? "is:" : "status:";
-        const query = word.slice(prefix.length);
-        const statuses = ["todo", "in_progress", "done"];
-        options = statuses
-            .filter(s => s.includes(query))
-            .map(s => ({ value: `${prefix}${s}`, label: `${prefix}${s}`, type: "Estado" }));
-    } 
-    // 4. Epics (epic:...)
-    else if (word.startsWith("epic:")) {
-        const query = word.slice(5).replace(/"/g, '');
-        const epics = [...new Set(rawTickets.map(t => t.epic).filter(Boolean))];
-        options = epics
-            .filter(e => e.toLowerCase().includes(query))
-            .map(e => ({ 
-                value: e.includes(" ") ? `epic:"${e}"` : `epic:${e}`, 
-                label: `epic:${e}`, 
-                type: "Epic" 
-            }));
-    }
-    // 5. Sugerencias por defecto si está empezando a escribir
-    else if (word === "") {
-        options = [
-            { value: "@", label: "@asignado", type: "Filtro" },
-            { value: "#", label: "#etiqueta", type: "Filtro" },
-            { value: "is:", label: "is:estado", type: "Filtro" },
-            { value: "epic:", label: "epic:nombre", type: "Filtro" }
-        ];
-    }
-
-    return options;
-}
-
-function showOmnibarSuggestions() {
-    if (!searchInput || !suggestionsContainer) return;
-
-    const cursorPos = searchInput.selectionStart;
-    const textBeforeCursor = searchInput.value.slice(0, cursorPos);
-    const words = textBeforeCursor.split(/\s+/);
-    const currentWord = words[words.length - 1];
-
-    const suggestions = getOmnibarSuggestions(currentWord);
-
-    if (suggestions.length === 0) {
-        suggestionsContainer.style.display = "none";
-        activeSuggestionIndex = -1;
-        return;
-    }
-
-    activeSuggestionIndex = 0;
-    suggestionsContainer.innerHTML = suggestions.map((item, index) => `
-        <div class="suggestion-item ${index === 0 ? 'selected' : ''}" data-value="${item.value}">
-            <span>${item.label}</span>
-            <span class="suggestion-badge">${item.type}</span>
-        </div>
-    `).join("");
-
-    suggestionsContainer.style.display = "block";
-
-    // Clic en sugerencia
-    suggestionsContainer.querySelectorAll(".suggestion-item").forEach(item => {
-        item.addEventListener("click", () => applySuggestion(item.dataset.value));
-    });
-}
-
-function applySuggestion(selectedValue) {
-    const cursorPos = searchInput.selectionStart;
-    const text = searchInput.value;
-    const textBeforeCursor = text.slice(0, cursorPos);
-    const textAfterCursor = text.slice(cursorPos);
-    
-    const words = textBeforeCursor.split(/\s+/);
-    words[words.length - 1] = selectedValue;
-
-    const newTextBefore = words.join(" ") + " ";
-    searchInput.value = newTextBefore + textAfterCursor;
-    
-    // Posicionar cursor tras la inserción
-    const newCursorPos = newTextBefore.length;
-    searchInput.setSelectionRange(newCursorPos, newCursorPos);
-    
-    suggestionsContainer.style.display = "none";
-    searchInput.focus();
-    applyOmnibarFilter();
-}
-
-// Eventos del Input
-if (searchInput) {
-    searchInput.addEventListener("input", () => {
-        showOmnibarSuggestions();
-    });
-
-    searchInput.addEventListener("focus", () => {
-        showOmnibarSuggestions();
-    });
-
-    searchInput.addEventListener("keydown", (e) => {
-        if (!suggestionsContainer || suggestionsContainer.style.display === "none") return;
-
-        const items = suggestionsContainer.querySelectorAll(".suggestion-item");
-        if (items.length === 0) return;
-
-        if (e.key === "ArrowDown") {
-            e.preventDefault();
-            activeSuggestionIndex = (activeSuggestionIndex + 1) % items.length;
-            updateSelectedSuggestion(items);
-        } else if (e.key === "ArrowUp") {
-            e.preventDefault();
-            activeSuggestionIndex = (activeSuggestionIndex - 1 + items.length) % items.length;
-            updateSelectedSuggestion(items);
-        } else if (e.key === "Enter" || e.key === "Tab") {
-            if (activeSuggestionIndex >= 0 && items[activeSuggestionIndex]) {
-                e.preventDefault();
-                applySuggestion(items[activeSuggestionIndex].dataset.value);
-            }
-        } else if (e.key === "Escape") {
-            suggestionsContainer.style.display = "none";
-        }
-    });
-}
-
-function updateSelectedSuggestion(items) {
-    items.forEach((item, index) => {
-        item.classList.toggle("selected", index === activeSuggestionIndex);
-        if (index === activeSuggestionIndex) {
-            item.scrollIntoView({ block: "nearest" });
-        }
-    });
-}
-
-// Cerrar desplegable si se hace clic fuera
-document.addEventListener("click", (e) => {
-    if (suggestionsContainer && !e.target.closest(".search-container")) {
-        suggestionsContainer.style.display = "none";
-    }
-});
 
 document.addEventListener("DOMContentLoaded", initBoard);
