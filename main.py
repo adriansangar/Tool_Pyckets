@@ -9,8 +9,12 @@ from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
 import os
+from fastapi import FastAPI, Depends, HTTPException, Response, status, UploadFile, File, Form
 
-from models import Ticket, Epic, Column, Project, User, ProjectMember, ProjectRole
+from models import (
+    Ticket, Epic, Column, Project, User, ProjectMember, ProjectRole,
+    Repository, CommitLink, PullRequestLink, TicketComment
+)
 from database import get_session, create_db_and_tables, engine
 from auth import (
     get_password_hash, 
@@ -448,3 +452,305 @@ def remove_project_member(
     session.delete(member)
     session.commit()
     return {"message": "Miembro eliminado"}
+
+import re
+from models import (
+    Ticket, Epic, Column, Project, User, ProjectMember, ProjectRole,
+    Repository, CommitLink, PullRequestLink
+)
+from github_service import verify_repo_access, fetch_repo_commits, fetch_repo_pulls
+
+# --- ESQUEMAS FASE 8 (GITHUB) ---
+class RepositoryCreate(BaseModel):
+    owner: str
+    repo_name: str
+    access_token: Optional[str] = None
+    default_branch: str = "main"
+
+class RepositoryResponse(BaseModel):
+    id: int
+    project_id: int
+    owner: str
+    repo_name: str
+    default_branch: str
+    is_active: bool
+
+class GitHubActivityResponse(BaseModel):
+    commits: List[CommitLink]
+    pull_requests: List[PullRequestLink]
+
+
+# --- MOTOR DE PARSING (TB-12 / #12) ---
+def extract_ticket_ids(text: str) -> List[int]:
+    if not text:
+        return []
+    # Captura patrones tipo TB-12, TB12 o #12
+    matches = re.findall(r'(?:TB-?|#)(\d+)', text, re.IGNORECASE)
+    return list(set(int(m) for m in matches))
+
+
+# --- ENDPOINTS GITHUB ---
+@app.post("/api/projects/{project_id}/repositories", response_model=RepositoryResponse)
+async def link_repository(
+    project_id: int,
+    repo_in: RepositoryCreate,
+    current_user: User = Depends(get_current_user_from_token),
+    session: Session = Depends(get_session)
+):
+    check_project_permission(project_id, current_user, session, [ProjectRole.OWNER, ProjectRole.ADMIN])
+    
+    # Verificar validez del repositorio en GitHub
+    valid = await verify_repo_access(repo_in.owner, repo_in.repo_name, repo_in.access_token)
+    if not valid:
+        raise HTTPException(
+            status_code=400, 
+            detail="No se pudo verificar el repositorio. Revisa el propietario, nombre o token de acceso."
+        )
+
+    db_repo = Repository(
+        project_id=project_id,
+        owner=repo_in.owner,
+        repo_name=repo_in.repo_name,
+        access_token=repo_in.access_token,
+        default_branch=repo_in.default_branch,
+        is_active=True
+    )
+    session.add(db_repo)
+    session.commit()
+    session.refresh(db_repo)
+    return db_repo
+
+
+@app.get("/api/projects/{project_id}/repositories", response_model=List[RepositoryResponse])
+def get_project_repositories(
+    project_id: int,
+    current_user: User = Depends(get_current_user_from_token),
+    session: Session = Depends(get_session)
+):
+    check_project_permission(project_id, current_user, session, [ProjectRole.OWNER, ProjectRole.ADMIN, ProjectRole.MEMBER, ProjectRole.VIEWER])
+    return session.exec(
+        select(Repository).where(Repository.project_id == project_id, Repository.is_active == True)
+    ).all()
+
+
+@app.delete("/api/projects/{project_id}/repositories/{repo_id}")
+def unlink_repository(
+    project_id: int,
+    repo_id: int,
+    current_user: User = Depends(get_current_user_from_token),
+    session: Session = Depends(get_session)
+):
+    check_project_permission(project_id, current_user, session, [ProjectRole.OWNER, ProjectRole.ADMIN])
+    repo = session.get(Repository, repo_id)
+    if not repo or repo.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Repositorio no encontrado")
+    
+    session.delete(repo)
+    session.commit()
+    return {"message": "Repositorio desvinculado"}
+
+
+@app.post("/api/projects/{project_id}/github/sync")
+async def sync_github_data(
+    project_id: int,
+    current_user: User = Depends(get_current_user_from_token),
+    session: Session = Depends(get_session)
+):
+    check_project_permission(project_id, current_user, session, [ProjectRole.OWNER, ProjectRole.ADMIN, ProjectRole.MEMBER])
+    
+    repos = session.exec(
+        select(Repository).where(Repository.project_id == project_id, Repository.is_active == True)
+    ).all()
+    if not repos:
+        return {"message": "Sin repositorios vinculados", "synced_commits": 0, "synced_prs": 0}
+
+    tickets = session.exec(select(Ticket).where(Ticket.project_id == project_id)).all()
+    ticket_ids = {t.id for t in tickets}
+
+    new_commits_count = 0
+    new_prs_count = 0
+
+    for repo in repos:
+        # 1. Sincronizar Commits
+        commits_data = await fetch_repo_commits(repo.owner, repo.repo_name, repo.access_token)
+        for item in commits_data:
+            sha = item.get("sha")
+            msg = item.get("commit", {}).get("message", "")
+            author = item.get("commit", {}).get("author", {}).get("name", "Desconocido")
+            url = item.get("html_url", "")
+            
+            matched_ids = extract_ticket_ids(msg)
+            for t_id in matched_ids:
+                if t_id in ticket_ids:
+                    existing = session.exec(
+                        select(CommitLink).where(CommitLink.ticket_id == t_id, CommitLink.commit_sha == sha)
+                    ).first()
+                    if not existing:
+                        session.add(CommitLink(
+                            ticket_id=t_id,
+                            commit_sha=sha,
+                            message=msg.split("\n")[0][:255], # Guardar primera línea
+                            author=author,
+                            url=url
+                        ))
+                        new_commits_count += 1
+
+        # 2. Sincronizar Pull Requests
+        prs_data = await fetch_repo_pulls(repo.owner, repo.repo_name, repo.access_token)
+        for pr in prs_data:
+            number = pr.get("number")
+            title = pr.get("title", "")
+            state = pr.get("state", "open")
+            if pr.get("merged_at"):
+                state = "merged"
+            url = pr.get("html_url", "")
+            author = pr.get("user", {}).get("login", "Desconocido")
+
+            matched_ids = extract_ticket_ids(title)
+            for t_id in matched_ids:
+                if t_id in ticket_ids:
+                    existing = session.exec(
+                        select(PullRequestLink).where(PullRequestLink.ticket_id == t_id, PullRequestLink.pr_number == number)
+                    ).first()
+                    if existing:
+                        existing.title = title
+                        existing.state = state
+                        session.add(existing)
+                    else:
+                        session.add(PullRequestLink(
+                            ticket_id=t_id,
+                            pr_number=number,
+                            title=title,
+                            state=state,
+                            url=url,
+                            author=author
+                        ))
+                        new_prs_count += 1
+
+    session.commit()
+    return {
+        "message": "Sincronización completada",
+        "synced_commits": new_commits_count,
+        "synced_prs": new_prs_count
+    }
+
+
+@app.get("/api/tickets/{ticket_id}/github", response_model=GitHubActivityResponse)
+def get_ticket_github_activity(
+    ticket_id: int,
+    current_user: User = Depends(get_current_user_from_token),
+    session: Session = Depends(get_session)
+):
+    ticket = session.get(Ticket, ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket no encontrado")
+        
+    commits = session.exec(select(CommitLink).where(CommitLink.ticket_id == ticket_id)).all()
+    prs = session.exec(select(PullRequestLink).where(PullRequestLink.ticket_id == ticket_id)).all()
+    
+    return GitHubActivityResponse(commits=commits, pull_requests=prs)
+
+import asyncio
+
+# --- BUCLE DE SINCRONIZACIÓN AUTOMÁTICA ---
+async def periodic_github_sync(interval_seconds: int = 300):
+    """Sincroniza todos los repositorios activos automáticamente cada X segundos (por defecto 5 min)"""
+    while True:
+        try:
+            await asyncio.sleep(interval_seconds)
+            with Session(engine) as session:
+                repos = session.exec(select(Repository).where(Repository.is_active == True)).all()
+                for repo in repos:
+                    # Reutiliza la lógica de extracción de commits y PRs
+                    commits_data = await fetch_repo_commits(repo.owner, repo.repo_name, repo.access_token)
+                    tickets = session.exec(select(Ticket).where(Ticket.project_id == repo.project_id)).all()
+                    ticket_ids = {t.id for t in tickets}
+
+                    for item in commits_data:
+                        sha = item.get("sha")
+                        msg = item.get("commit", {}).get("message", "")
+                        author = item.get("commit", {}).get("author", {}).get("name", "Desconocido")
+                        url = item.get("html_url", "")
+                        
+                        for t_id in extract_ticket_ids(msg):
+                            if t_id in ticket_ids:
+                                existing = session.exec(
+                                    select(CommitLink).where(CommitLink.ticket_id == t_id, CommitLink.commit_sha == sha)
+                                ).first()
+                                if not existing:
+                                    session.add(CommitLink(
+                                        ticket_id=t_id, commit_sha=sha, message=msg.split("\n")[0][:255],
+                                        author=author, url=url
+                                    ))
+                    session.commit()
+        except Exception as e:
+            print(f"⚠️ Error en auto-sincronización de GitHub: {e}")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    create_db_and_tables()
+    with Session(engine) as session:
+        admin = session.exec(select(User).where(User.username == "adrian")).first()
+        if admin and not admin.is_superuser:
+            admin.is_superuser = True
+            session.add(admin)
+            session.commit()
+
+    # Arrancar tarea periódica en segundo plano
+    sync_task = asyncio.create_task(periodic_github_sync(interval_seconds=300)) # 5 minutos
+    yield
+    sync_task.cancel()
+
+from fastapi import UploadFile, File
+import shutil
+
+# Crear carpeta de estáticos para archivos subidos
+UPLOAD_DIR = os.path.join("static", "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+class CommentCreate(BaseModel):
+    content: str
+
+@app.get("/api/tickets/{ticket_id}/comments", response_model=List[TicketComment])
+def get_ticket_comments(
+    ticket_id: int,
+    current_user: User = Depends(get_current_user_from_token),
+    session: Session = Depends(get_session)
+):
+    return session.exec(
+        select(TicketComment).where(TicketComment.ticket_id == ticket_id).order_by(TicketComment.created_at.asc())
+    ).all()
+
+@app.post("/api/tickets/{ticket_id}/comments", response_model=TicketComment)
+async def add_ticket_comment(
+    ticket_id: int,
+    content: str = Form(""),
+    file: Optional[UploadFile] = File(None),
+    current_user: User = Depends(get_current_user_from_token),
+    session: Session = Depends(get_session)
+):
+    ticket = session.get(Ticket, ticket_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket no encontrado")
+
+    image_url = None
+    if file and file.filename:
+        filename = f"{datetime.now().timestamp()}_{file.filename}"
+        file_path = os.path.join(UPLOAD_DIR, filename)
+        
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        image_url = f"/static/uploads/{filename}"
+
+    comment = TicketComment(
+        ticket_id=ticket_id,
+        author_username=current_user.username,
+        author_avatar=current_user.avatar or "🚀",
+        content=content,
+        image_url=image_url
+    )
+    session.add(comment)
+    session.commit()
+    session.refresh(comment)
+    return comment

@@ -479,3 +479,43 @@ header {
     border-bottom: 1px solid var(--sidebar-border);
     background-color: var(--bg-card);
 }
+
+/* --- ESTILOS FASE 8: GITHUB ACTIVITY --- */
+.github-item {
+    background: var(--bg-app);
+    padding: 8px 10px;
+    border-radius: var(--radius-card);
+    margin-bottom: 6px;
+    border: 1px solid var(--sidebar-border);
+}
+
+.github-item-title {
+    font-weight: 600;
+    color: var(--text-main);
+    text-decoration: none;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.github-item-title:hover {
+    color: var(--primary);
+}
+
+.github-meta {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+
+.pr-badge {
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.pr-badge.open { background: #dafbe1; color: #1a7f37; }
+.pr-badge.merged { background: #f3e8ff; color: #8250df; }
+.pr-badge.closed { background: #ffebe9; color: #cf222e; }

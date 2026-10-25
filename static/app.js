@@ -1265,4 +1265,249 @@ if (passwordForm) {
     });
 }
 
+// --- FASE 8: LÓGICA DE GITHUB ---
+const githubModal = document.getElementById("github-modal");
+const btnProjectRepos = document.getElementById("btn-project-repos");
+const btnSyncGithub = document.getElementById("btn-sync-github");
+const closeGithubModal = document.getElementById("close-github-modal");
+const linkRepoForm = document.getElementById("link-repo-form");
+
+if (btnProjectRepos) {
+    btnProjectRepos.addEventListener("click", async () => {
+        if (!currentProjectId) return;
+        await renderProjectRepos();
+        githubModal.style.display = "flex";
+    });
+}
+
+if (closeGithubModal) closeGithubModal.addEventListener("click", () => githubModal.style.display = "none");
+
+async function renderProjectRepos() {
+    const list = document.getElementById("project-repos-list");
+    if (!list || !currentProjectId) return;
+
+    try {
+        const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/repositories`);
+        if (!res.ok) return;
+        const repos = await res.json();
+
+        if (repos.length === 0) {
+            list.innerHTML = "<p style='font-size: 0.85rem; color: var(--text-muted);'>No hay repositorios vinculados a este proyecto.</p>";
+            return;
+        }
+
+        list.innerHTML = repos.map(r => `
+            <div class="archived-item">
+                <div>
+                    <strong>${r.owner}/${r.repo_name}</strong>
+                    <span style="font-size: 0.75rem; color: var(--text-muted);">(${r.default_branch})</span>
+                </div>
+                <button class="btn" style="padding: 2px 8px; font-size: 0.75rem; color: #ff5630; border-color: #ff5630;" onclick="unlinkRepo(${r.id})">Desvincular</button>
+            </div>
+        `).join("");
+    } catch (e) {
+        console.error("Error cargando repositorios:", e);
+    }
+}
+
+if (linkRepoForm) {
+    linkRepoForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const owner = document.getElementById("repo-owner").value.trim();
+        const repo_name = document.getElementById("repo-name").value.trim();
+        const access_token = document.getElementById("repo-token").value.trim();
+
+        try {
+            const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/repositories`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ owner, repo_name, access_token: access_token || null })
+            });
+
+            if (res.ok) {
+                linkRepoForm.reset();
+                await renderProjectRepos();
+            } else {
+                const data = await res.json();
+                alert(data.detail || "Error al vincular el repositorio.");
+            }
+        } catch (err) {
+            console.error("Error vinculando repo:", err);
+        }
+    });
+}
+
+window.unlinkRepo = async function(repoId) {
+    if (!confirm("¿Desvincular este repositorio del proyecto?")) return;
+    try {
+        const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/repositories/${repoId}`, { method: "DELETE" });
+        if (res.ok) await renderProjectRepos();
+    } catch (err) {
+        console.error("Error desvinculando repo:", err);
+    }
+};
+
+if (btnSyncGithub) {
+    btnSyncGithub.addEventListener("click", async () => {
+        if (!currentProjectId) return;
+        btnSyncGithub.textContent = "⏳ Sincronizando...";
+        btnSyncGithub.disabled = true;
+
+        try {
+            const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/github/sync`, { method: "POST" });
+            if (res.ok) {
+                const data = await res.json();
+                alert(`✅ Sincronización completada:\n• ${data.synced_commits} nuevos commits\n• ${data.synced_prs} nuevos PRs`);
+            } else {
+                alert("Error durante la sincronización.");
+            }
+        } catch (err) {
+            console.error("Error sincronizando GitHub:", err);
+        } finally {
+            btnSyncGithub.textContent = "🔄 Sincronizar GitHub";
+            btnSyncGithub.disabled = false;
+        }
+    });
+}
+
+// Cargar commits y PRs asociados al abrir el panel lateral del ticket
+async function loadTicketGithubActivity(ticketId) {
+    const container = document.getElementById("ticket-github-activity");
+    if (!container) return;
+
+    container.innerHTML = "<p style='margin:0;'>Cargando actividad de GitHub...</p>";
+
+    try {
+        const res = await authFetch(`${API_BASE}/tickets/${ticketId}/github`);
+        if (!res.ok) return;
+        const data = await res.json();
+
+        if (data.commits.length === 0 && data.pull_requests.length === 0) {
+            container.innerHTML = "<p style='margin:0;'>Sin commits ni Pull Requests vinculados a este ticket.</p>";
+            return;
+        }
+
+        let html = "";
+
+        if (data.pull_requests.length > 0) {
+            html += "<strong style='display:block; margin-bottom: 4px; color: var(--text-main);'>Pull Requests:</strong>";
+            data.pull_requests.forEach(pr => {
+                html += `
+                    <div class="github-item">
+                        <a href="${pr.url}" target="_blank" class="github-item-title">
+                            <span>#${pr.pr_number} ${pr.title}</span>
+                            <span class="pr-badge ${pr.state}">${pr.state}</span>
+                        </a>
+                        <div class="github-meta">por @${pr.author}</div>
+                    </div>
+                `;
+            });
+        }
+
+        if (data.commits.length > 0) {
+            html += "<strong style='display:block; margin-top: 8px; margin-bottom: 4px; color: var(--text-main);'>Commits:</strong>";
+            data.commits.forEach(c => {
+                html += `
+                    <div class="github-item">
+                        <a href="${c.url}" target="_blank" class="github-item-title">
+                            <span><code>${c.commit_sha.substring(0, 7)}</code> ${c.message}</span>
+                        </a>
+                        <div class="github-meta">por ${c.author}</div>
+                    </div>
+                `;
+            });
+        }
+
+        container.innerHTML = html;
+    } catch (e) {
+        console.error("Error cargando actividad de GitHub:", e);
+        container.innerHTML = "<p style='margin:0; color: #ff5630;'>Error cargando datos de GitHub.</p>";
+    }
+}
+
+// Conectar con la apertura de edicion de ticket
+const baseOpenEditPanel = openEditPanel;
+openEditPanel = async function(ticketId) {
+    await baseOpenEditPanel(ticketId);
+    await loadTicketGithubActivity(ticketId);
+};
+
+// --- LÓGICA DE COMENTARIOS EN TICKETS ---
+async function loadTicketComments(ticketId) {
+    const list = document.getElementById("ticket-comments-list");
+    if (!list) return;
+
+    try {
+        const res = await authFetch(`${API_BASE}/tickets/${ticketId}/comments`);
+        if (!res.ok) return;
+        const comments = await res.json();
+
+        if (comments.length === 0) {
+            list.innerHTML = "<p style='font-size: 0.8rem; color: var(--text-muted);'>No hay comentarios todavía.</p>";
+            return;
+        }
+
+        list.innerHTML = comments.map(c => `
+            <div class="github-item" style="margin-bottom: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                    <strong>${c.author_avatar} @${c.author_username}</strong>
+                    <span style="font-size: 0.7rem; color: var(--text-muted);">${new Date(c.created_at).toLocaleString()}</span>
+                </div>
+                <div style="font-size: 0.85rem; color: var(--text-main); white-space: pre-wrap;">${c.content}</div>
+                ${c.image_url ? `<div style="margin-top: 6px;"><a href="${c.image_url}" target="_blank"><img src="${c.image_url}" style="max-width: 100%; max-height: 180px; border-radius: 6px; border: 1px solid var(--sidebar-border);" /></a></div>` : ''}
+            </div>
+        `).join("");
+        
+        list.scrollTop = list.scrollHeight;
+    } catch (e) {
+        console.error("Error cargando comentarios:", e);
+    }
+}
+
+const addCommentForm = document.getElementById("add-comment-form");
+if (addCommentForm) {
+    addCommentForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const ticketId = document.getElementById("ticket-id").value;
+        if (!ticketId) return;
+
+        const text = document.getElementById("comment-text").value.trim();
+        const fileInput = document.getElementById("comment-file");
+
+        if (!text && fileInput.files.length === 0) return;
+
+        const formData = new FormData();
+        formData.append("content", text);
+        if (fileInput.files.length > 0) {
+            formData.append("file", fileInput.files[0]);
+        }
+
+        try {
+            const token = localStorage.getItem("pyckets_token");
+            const res = await fetch(`${API_BASE}/tickets/${ticketId}/comments`, {
+                method: "POST",
+                headers: {
+                    ...(token ? { "Authorization": `Bearer ${token}` } : {})
+                },
+                body: formData
+            });
+
+            if (res.ok) {
+                document.getElementById("comment-text").value = "";
+                fileInput.value = "";
+                await loadTicketComments(ticketId);
+            }
+        } catch (err) {
+            console.error("Error guardando comentario:", err);
+        }
+    });
+}
+
+// Conectar carga de comentarios al abrir edición de ticket
+const prevOpenEditPanel = openEditPanel;
+openEditPanel = async function(ticketId) {
+    await prevOpenEditPanel(ticketId);
+    await loadTicketComments(ticketId);
+};
+
 document.addEventListener("DOMContentLoaded", initBoard);

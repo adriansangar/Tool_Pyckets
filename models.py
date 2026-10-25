@@ -2,7 +2,7 @@ from typing import Optional, List
 from enum import Enum
 from sqlmodel import Field, SQLModel
 from sqlalchemy import Column as SAColumn, JSON
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 class ProjectRole(str, Enum):
     OWNER = "owner"
@@ -18,7 +18,7 @@ class User(SQLModel, table=True):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     avatar: str = Field(default="🚀")
-    theme_preference: str = Field(default="dark")  # "dark", "light"
+    theme_preference: str = Field(default="dark")
     is_active: bool = Field(default=True)
     is_superuser: bool = Field(default=False)
 
@@ -57,3 +57,40 @@ class Ticket(SQLModel, table=True):
     assignee: Optional[str] = None      
     due_date: Optional[date] = None     
     time_logged: Optional[int] = 0
+
+class Repository(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    project_id: int = Field(foreign_key="project.id", index=True)
+    owner: str
+    repo_name: str
+    access_token: Optional[str] = None
+    default_branch: str = "main"
+    is_active: bool = Field(default=True)
+
+class CommitLink(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    ticket_id: int = Field(foreign_key="ticket.id", index=True)
+    commit_sha: str = Field(index=True)
+    message: str
+    author: str
+    url: str
+    committed_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class PullRequestLink(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    ticket_id: int = Field(foreign_key="ticket.id", index=True)
+    pr_number: int
+    title: str
+    state: str
+    url: str
+    author: str
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+class TicketComment(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    ticket_id: int = Field(foreign_key="ticket.id", index=True)
+    author_username: str
+    author_avatar: str = "🚀"
+    content: str
+    image_url: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
