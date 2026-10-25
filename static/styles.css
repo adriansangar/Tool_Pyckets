@@ -424,3 +424,58 @@ header {
     color: var(--primary);
     background-color: var(--sidebar-hover);
 }
+
+/* --- PERFIL DE USUARIO & AVATARES --- */
+.user-profile-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 6px 12px;
+    border-radius: var(--radius-card);
+    background: var(--sidebar-hover);
+    cursor: pointer;
+    border: 1px solid var(--sidebar-border);
+    transition: var(--transition);
+}
+
+.user-profile-btn:hover {
+    border-color: var(--primary);
+}
+
+.avatar-badge {
+    font-size: 1.2rem;
+    line-height: 1;
+}
+
+.avatar-selector {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-top: 0.5rem;
+}
+
+.avatar-option {
+    font-size: 1.5rem;
+    padding: 6px;
+    border-radius: 8px;
+    border: 2px solid transparent;
+    cursor: pointer;
+    background: var(--bg-app);
+    transition: var(--transition);
+}
+
+.avatar-option:hover,
+.avatar-option.selected {
+    border-color: var(--primary);
+    background: var(--sidebar-hover);
+    transform: scale(1.1);
+}
+
+.top-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid var(--sidebar-border);
+    background-color: var(--bg-card);
+}

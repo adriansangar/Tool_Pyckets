@@ -16,11 +16,112 @@ let globalColumns = [];
 let rawTickets = [];
 let currentProjectId = null;
 let activeSuggestionIndex = -1;
+let currentUser = null;
 
-// --- INIT ---
+// --- CLIENTE HTTP CON AUTENTICACIÓN AUTOMÁTICA ---
+async function authFetch(url, options = {}) {
+    const token = localStorage.getItem("pyckets_token");
+    options.headers = {
+        ...options.headers,
+        ...(token ? { "Authorization": `Bearer ${token}` } : {})
+    };
+
+    const response = await fetch(url, options);
+    if (response.status === 401) {
+        const loginScreen = document.getElementById("login-screen");
+        if (loginScreen) loginScreen.style.display = "flex";
+    }
+    return response;
+}
+
+// --- INIT Y AUTENTICACIÓN ---
 async function initBoard() {
+    const isAuthenticated = await checkAuth();
+    if (!isAuthenticated) return;
+
     await loadProjects();
     await fetchAndRenderTickets();
+}
+
+async function checkAuth() {
+    const loginScreen = document.getElementById("login-screen");
+    const token = localStorage.getItem("pyckets_token");
+    
+    if (!token) {
+        if (loginScreen) loginScreen.style.display = "flex";
+        return false;
+    }
+
+    try {
+        const res = await authFetch(`${API_BASE}/auth/me`);
+        if (res.ok) {
+            currentUser = await res.json();
+            updateProfileUI(currentUser);
+            if (loginScreen) loginScreen.style.display = "none";
+            return true;
+        }
+    } catch (e) {
+        console.error("Error verificando sesión:", e);
+    }
+
+    if (loginScreen) loginScreen.style.display = "flex";
+    return false;
+}
+
+// Formulario de Login
+const loginForm = document.getElementById("login-form");
+if (loginForm) {
+    loginForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const usernameInput = document.getElementById("login-username").value;
+        const passwordInput = document.getElementById("login-password").value;
+        const errorDiv = document.getElementById("login-error");
+
+        const formData = new URLSearchParams();
+        formData.append("username", usernameInput);
+        formData.append("password", passwordInput);
+
+        try {
+            const res = await fetch(`${API_BASE}/auth/login`, {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: formData
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                localStorage.setItem("pyckets_token", data.access_token);
+                if (errorDiv) errorDiv.style.display = "none";
+                const loginScreen = document.getElementById("login-screen");
+                if (loginScreen) loginScreen.style.display = "none";
+                await initBoard();
+            } else {
+                const data = await res.json();
+                if (errorDiv) {
+                    errorDiv.textContent = data.detail || "Credenciales incorrectas";
+                    errorDiv.style.display = "block";
+                }
+            }
+        } catch (err) {
+            console.error("Error en el inicio de sesión:", err);
+            if (errorDiv) {
+                errorDiv.textContent = "Error conectando con el servidor";
+                errorDiv.style.display = "block";
+            }
+        }
+    });
+}
+
+// --- LOGOUT ---
+const btnLogout = document.getElementById("btn-logout");
+if (btnLogout) {
+    btnLogout.addEventListener("click", () => {
+        if (confirm("¿Quieres cerrar sesión?")) {
+            localStorage.removeItem("pyckets_token");
+            currentUser = null;
+            location.reload();
+        }
+    });
 }
 
 async function fetchAndRenderTickets() {
@@ -28,9 +129,11 @@ async function fetchAndRenderTickets() {
         const ticketUrl = currentProjectId ? `${API_BASE}/tickets?project_id=${currentProjectId}` : `${API_BASE}/tickets`;
         
         const [columnsRes, ticketsRes] = await Promise.all([
-            fetch(`${API_BASE}/columns`),
-            fetch(ticketUrl)
+            authFetch(`${API_BASE}/columns`),
+            authFetch(ticketUrl)
         ]);
+
+        if (!columnsRes.ok || !ticketsRes.ok) return;
 
         globalColumns = await columnsRes.json();
         rawTickets = await ticketsRes.json();
@@ -316,7 +419,8 @@ if (navGlobalMine) {
 // --- CARGA DE PROYECTOS ---
 async function loadProjects() {
     try {
-        const res = await fetch(`${API_BASE}/projects`);
+        const res = await authFetch(`${API_BASE}/projects`);
+        if (!res.ok) return;
         const projects = await res.json();
         const projectList = document.getElementById("project-list");
         if(!projectList) return;
@@ -346,10 +450,12 @@ async function loadProjects() {
                     home.style.display = "block";
                     document.getElementById("home-project-name").textContent = `Resumen: ${p.name}`;
                     
-                    const tRes = await fetch(`${API_BASE}/tickets?project_id=${currentProjectId}`);
-                    const tickets = await tRes.json();
-                    document.getElementById("stat-total").textContent = tickets.length;
-                    document.getElementById("stat-done").textContent = tickets.filter(t => t.status === "done").length;
+                    const tRes = await authFetch(`${API_BASE}/tickets?project_id=${currentProjectId}`);
+                    if (tRes.ok) {
+                        const tickets = await tRes.json();
+                        document.getElementById("stat-total").textContent = tickets.length;
+                        document.getElementById("stat-done").textContent = tickets.filter(t => t.status === "done").length;
+                    }
                 }
             });
             
@@ -517,7 +623,7 @@ async function syncTicketStatus(ticketId, newStatus) {
 
 async function updateTicketStatus(ticketId, status) {
     try {
-        await fetch(`${API_BASE}/tickets/${ticketId}/status`, {
+        await authFetch(`${API_BASE}/tickets/${ticketId}/status`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: status })
@@ -631,7 +737,7 @@ if (sidePanel) {
             }
 
             try {
-                const response = await fetch(url, {
+                const response = await authFetch(url, {
                     method: method,
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(ticketData)
@@ -650,7 +756,8 @@ if (sidePanel) {
 
 async function openEditPanel(ticketId) {
     try {
-        const response = await fetch(`${API_BASE}/tickets`);
+        const response = await authFetch(`${API_BASE}/tickets`);
+        if (!response.ok) return;
         const allTickets = await response.json();
         const ticket = allTickets.find(t => t.id == ticketId);
         
@@ -696,7 +803,7 @@ if (btnArchiveProject) {
         const confirmArchive = confirm("¿Seguro que quieres archivar este proyecto?");
         if (confirmArchive) {
             try {
-                const res = await fetch(`${API_BASE}/projects/${currentProjectId}/archive`, { method: 'PUT' });
+                const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/archive`, { method: 'PUT' });
                 if (res.ok) {
                     currentProjectId = null;
                     await loadProjects();
@@ -724,7 +831,7 @@ if (projectForm) {
         const color = document.getElementById("new-project-color").value;
 
         try {
-            const res = await fetch(`${API_BASE}/projects`, {
+            const res = await authFetch(`${API_BASE}/projects`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name, color })
@@ -761,7 +868,8 @@ async function renderArchivedProjectsList() {
     if (!listContainer) return;
 
     try {
-        const res = await fetch(`${API_BASE}/projects?include_archived=true`);
+        const res = await authFetch(`${API_BASE}/projects?include_archived=true`);
+        if (!res.ok) return;
         const allProjects = await res.json();
         const archivedProjects = allProjects.filter(p => p.is_archived);
 
@@ -793,7 +901,7 @@ async function renderArchivedProjectsList() {
 
 window.unarchiveProject = async function(projectId) {
     try {
-        const res = await fetch(`${API_BASE}/projects/${projectId}/unarchive`, { method: 'PUT' });
+        const res = await authFetch(`${API_BASE}/projects/${projectId}/unarchive`, { method: 'PUT' });
         if (res.ok) {
             await loadProjects();
             await renderArchivedProjectsList();
@@ -806,7 +914,7 @@ window.unarchiveProject = async function(projectId) {
 window.deleteProjectPermanently = async function(projectId) {
     if (confirm("⚠️ ¿Seguro que quieres ELIMINAR permanentemente este proyecto y TODOS sus tickets? Esta acción no se puede deshacer.")) {
         try {
-            const res = await fetch(`${API_BASE}/projects/${projectId}`, { method: 'DELETE' });
+            const res = await authFetch(`${API_BASE}/projects/${projectId}`, { method: 'DELETE' });
             if (res.ok) {
                 await loadProjects();
                 await renderArchivedProjectsList();
@@ -868,6 +976,291 @@ if (themeToggleBtn) {
         } else {
             document.documentElement.setAttribute("data-theme", "dark");
             themeToggleBtn.textContent = "☀️";
+        }
+    });
+}
+
+// --- LÓGICA DE USUARIOS Y MIEMBROS ---
+const navManageUsers = document.getElementById("nav-manage-users");
+const usersModal = document.getElementById("users-modal");
+const closeUsersModal = document.getElementById("close-users-modal");
+const createUserForm = document.getElementById("create-user-form");
+
+const membersModal = document.getElementById("members-modal");
+const btnProjectMembers = document.getElementById("btn-project-members");
+const closeMembersModal = document.getElementById("close-members-modal");
+const addMemberForm = document.getElementById("add-member-form");
+
+function checkAdminUI() {
+    const navBtn = document.getElementById("nav-manage-users");
+    if (!navBtn) return;
+    if (currentUser && (currentUser.is_superuser || currentUser.username === "adrian")) {
+        navBtn.style.display = "flex";
+    } else {
+        navBtn.style.display = "none";
+    }
+}
+
+if (navManageUsers) {
+    navManageUsers.addEventListener("click", async () => {
+        await renderGlobalUsers();
+        usersModal.style.display = "flex";
+    });
+}
+if (closeUsersModal) closeUsersModal.addEventListener("click", () => usersModal.style.display = "none");
+
+async function renderGlobalUsers() {
+    const list = document.getElementById("global-users-list");
+    if (!list) return;
+    try {
+        const res = await authFetch(`${API_BASE}/users`);
+        if (!res.ok) return;
+        const users = await res.json();
+        list.innerHTML = users.map(u => `
+            <div class="archived-item">
+                <span><strong>${u.username}</strong> (${u.email}) ${u.is_superuser ? '<span class="tag-badge">Admin</span>' : ''}</span>
+            </div>
+        `).join("");
+    } catch (e) {
+        console.error("Error cargando usuarios:", e);
+    }
+}
+
+if (createUserForm) {
+    createUserForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const username = document.getElementById("new-user-name").value;
+        const email = document.getElementById("new-user-email").value;
+        const password = document.getElementById("new-user-pass").value;
+
+        try {
+            const res = await authFetch(`${API_BASE}/users`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ username, email, password })
+            });
+            if (res.ok) {
+                createUserForm.reset();
+                await renderGlobalUsers();
+            } else {
+                const data = await res.json();
+                alert(data.detail || "Error al crear el usuario.");
+            }
+        } catch (err) {
+            console.error("Error creando usuario:", err);
+        }
+    });
+}
+
+// MIEMBROS DEL PROYECTO
+if (btnProjectMembers) {
+    btnProjectMembers.addEventListener("click", async () => {
+        if (!currentProjectId) return;
+        await loadUsersDropdown();
+        await renderProjectMembers();
+        membersModal.style.display = "flex";
+    });
+}
+if (closeMembersModal) closeMembersModal.addEventListener("click", () => membersModal.style.display = "none");
+
+async function loadUsersDropdown() {
+    const select = document.getElementById("select-user-id");
+    if (!select) return;
+    try {
+        const res = await authFetch(`${API_BASE}/users`);
+        if (res.ok) {
+            const users = await res.json();
+            select.innerHTML = '<option value="">Seleccionar Usuario...</option>' + 
+                users.map(u => `<option value="${u.id}">${u.username} (${u.email})</option>`).join("");
+        }
+    } catch (e) {
+        select.innerHTML = '<option value="">Escribe ID de Usuario...</option>';
+    }
+}
+
+async function renderProjectMembers() {
+    const list = document.getElementById("project-members-list");
+    if (!list || !currentProjectId) return;
+
+    try {
+        const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/members`);
+        if (!res.ok) return;
+        const members = await res.json();
+
+        list.innerHTML = members.map(m => `
+            <div class="archived-item">
+                <div>
+                    <strong>${m.username}</strong> <span style="font-size: 0.8rem; color: var(--text-muted);">(${m.role})</span>
+                </div>
+                <button class="btn" style="padding: 2px 8px; font-size: 0.75rem; color: #ff5630; border-color: #ff5630;" onclick="removeMember(${m.user_id})">Quitar</button>
+            </div>
+        `).join("");
+    } catch (e) {
+        console.error("Error cargando miembros:", e);
+    }
+}
+
+if (addMemberForm) {
+    addMemberForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const userId = document.getElementById("select-user-id").value;
+        const role = document.getElementById("select-member-role").value;
+
+        if (!userId || !currentProjectId) return;
+
+        try {
+            const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/members`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ user_id: parseInt(userId), role: role })
+            });
+            if (res.ok) {
+                await renderProjectMembers();
+            }
+        } catch (err) {
+            console.error("Error añadiendo miembro:", err);
+        }
+    });
+}
+
+window.removeMember = async function(userId) {
+    if (!currentProjectId || !confirm("¿Revocar acceso a este usuario en el proyecto?")) return;
+    try {
+        const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/members/${userId}`, { method: "DELETE" });
+        if (res.ok) {
+            await renderProjectMembers();
+        }
+    } catch (err) {
+        console.error("Error eliminando miembro:", err);
+    }
+};
+
+// --- LÓGICA DE PERFIL DE USUARIO ---
+const profileModal = document.getElementById("profile-modal");
+const btnOpenProfile = document.getElementById("btn-open-profile");
+const closeProfileModal = document.getElementById("close-profile-modal");
+const profileForm = document.getElementById("profile-form");
+const passwordForm = document.getElementById("password-form");
+let selectedAvatar = "🚀";
+
+function updateProfileUI(user) {
+    if (!user) return;
+    currentUser = user;
+    
+    // Header badge
+    const badge = document.getElementById("user-avatar-badge");
+    const handle = document.getElementById("user-handle-text");
+    if (badge) badge.textContent = user.avatar || "🚀";
+    if (handle) handle.textContent = `@${user.username}`;
+
+    // Mostrar/Ocultar botón de gestión de usuarios según rol admin
+    checkAdminUI();
+
+    // Aplicar tema guardado
+    if (user.theme_preference === "dark") {
+        document.documentElement.setAttribute("data-theme", "dark");
+        if (themeToggleBtn) themeToggleBtn.textContent = "☀️";
+    } else {
+        document.documentElement.removeAttribute("data-theme");
+        if (themeToggleBtn) themeToggleBtn.textContent = "🌙";
+    }
+}
+
+if (btnOpenProfile) {
+    btnOpenProfile.addEventListener("click", () => {
+        if (!currentUser) return;
+        
+        document.getElementById("profile-username").value = `@${currentUser.username}`;
+        document.getElementById("profile-email").value = currentUser.email;
+        document.getElementById("profile-firstname").value = currentUser.first_name || "";
+        document.getElementById("profile-lastname").value = currentUser.last_name || "";
+        document.getElementById("profile-theme").value = currentUser.theme_preference || "dark";
+        
+        selectedAvatar = currentUser.avatar || "🚀";
+        highlightSelectedAvatar(selectedAvatar);
+        
+        profileModal.style.display = "flex";
+    });
+}
+
+if (closeProfileModal) {
+    closeProfileModal.addEventListener("click", () => profileModal.style.display = "none");
+}
+
+// Selector de animalitos
+const avatarPicker = document.getElementById("avatar-picker");
+if (avatarPicker) {
+    avatarPicker.querySelectorAll(".avatar-option").forEach(opt => {
+        opt.addEventListener("click", () => {
+            selectedAvatar = opt.dataset.avatar;
+            highlightSelectedAvatar(selectedAvatar);
+        });
+    });
+}
+
+function highlightSelectedAvatar(avatarEmoji) {
+    document.querySelectorAll(".avatar-option").forEach(opt => {
+        opt.classList.toggle("selected", opt.dataset.avatar === avatarEmoji);
+    });
+}
+
+// Guardar Perfil
+if (profileForm) {
+    profileForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const firstName = document.getElementById("profile-firstname").value;
+        const lastName = document.getElementById("profile-lastname").value;
+        const theme = document.getElementById("profile-theme").value;
+
+        try {
+            const res = await authFetch(`${API_BASE}/auth/me`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    first_name: firstName,
+                    last_name: lastName,
+                    avatar: selectedAvatar,
+                    theme_preference: theme
+                })
+            });
+
+            if (res.ok) {
+                const updatedUser = await res.json();
+                updateProfileUI(updatedUser);
+                profileModal.style.display = "none";
+            }
+        } catch (err) {
+            console.error("Error guardando perfil:", err);
+        }
+    });
+}
+
+// Cambiar Contraseña
+if (passwordForm) {
+    passwordForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const currentPassword = document.getElementById("pwd-current").value;
+        const newPassword = document.getElementById("pwd-new").value;
+
+        try {
+            const res = await authFetch(`${API_BASE}/auth/me/password`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    current_password: currentPassword,
+                    new_password: newPassword
+                })
+            });
+
+            if (res.ok) {
+                alert("Contraseña actualizada con éxito");
+                passwordForm.reset();
+            } else {
+                const data = await res.json();
+                alert(data.detail || "Error al cambiar la contraseña");
+            }
+        } catch (err) {
+            console.error("Error cambiando contraseña:", err);
         }
     });
 }
