@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pyckets</title>
-    <link rel="stylesheet" href="/static/styles.css?v=v8.1">
+    <link rel="stylesheet" href="/static/styles.css?v=v8.2">
 </head>
 <body>
 
@@ -57,7 +57,6 @@
 
         <!-- CONTENIDO PRINCIPAL -->
         <main class="main-content">
-            <!-- CABECERA ÚNICA Y ALINEADA -->
             <header class="top-header">
                 <h2 id="board-title" style="margin: 0; font-size: 1.25rem;">Todos los Tickets</h2>
                 
@@ -71,7 +70,6 @@
                     <button id="header-new-ticket" class="btn primary" style="display: none;">+ Nuevo Ticket</button>
                     <button id="theme-toggle" class="icon-btn" title="Cambiar tema">🌙</button>
 
-                    <!-- PERFIL DE USUARIO -->
                     <div id="btn-open-profile" class="user-profile-btn" title="Mi Perfil">
                         <span id="user-avatar-badge" class="avatar-badge">🚀</span>
                         <span id="user-handle-text" style="font-size: 0.85rem; font-weight: 600;">@usuario</span>
@@ -79,11 +77,10 @@
                 </div>
             </header>
 
-            <!-- FILTROS RÁPIDOS -->
             <div id="quick-filters" class="quick-filters-bar"></div>
 
             <!-- VISTA PROYECTO HOME -->
-            <div id="project-home" style="display: none; padding: 2rem;">
+            <div id="project-home" style="display: none; padding: 2rem; overflow-y: auto;">
                 <h2 id="home-project-name">Resumen del Proyecto</h2>
                 <div style="display: flex; gap: 1.5rem; margin-top: 1rem;">
                     <div class="stat-card">
@@ -95,17 +92,21 @@
                         <span class="stat-label">Completados</span>
                     </div>
                 </div>
-                <div style="margin-top: 2rem; display: flex; gap: 1rem; flex-wrap: wrap;">
+
+                <div style="margin-top: 1.5rem; display: flex; gap: 0.8rem; flex-wrap: wrap;">
                     <button id="btn-go-board" class="btn primary">Ir al Tablero Kanban</button>
                     <button id="btn-project-members" class="btn">👥 Miembros</button>
                     <button id="btn-project-repos" class="btn">🐙 Repositorios GitHub</button>
                     <button id="btn-sync-github" class="btn" style="background: var(--sidebar-hover);">🔄 Sincronizar GitHub</button>
                     <button id="btn-archive-project" class="btn" style="color: #ff5630; border-color: #ff5630;">📦 Archivar</button>
                 </div>
-                <div style="margin-top: 2rem; display: flex; gap: 1rem;">
-                    <button id="btn-go-board" class="btn primary">Ir al Tablero Kanban</button>
-                    <button id="btn-project-members" class="btn">👥 Miembros</button>
-                    <button id="btn-archive-project" class="btn" style="color: #ff5630; border-color: #ff5630;">📦 Archivar</button>
+
+                <!-- FEED GLOBAL DE ACTIVIDAD GITHUB EN EL PROYECTO -->
+                <div style="margin-top: 2rem;">
+                    <h3 style="margin-bottom: 0.8rem;">📜 Feed de Actividad de GitHub en el Proyecto</h3>
+                    <div id="project-github-feed" style="background: var(--bg-card); border: 1px solid var(--sidebar-border); border-radius: 8px; padding: 1rem; max-height: 300px; overflow-y: auto;">
+                        <p style="color: var(--text-muted); font-size: 0.9rem;">Cargando actividad...</p>
+                    </div>
                 </div>
             </div>
 
@@ -137,27 +138,6 @@
         <div class="panel-header">
             <h3 id="panel-title">Nuevo Ticket</h3>
             <button id="close-panel" class="icon-btn">&times;</button>
-                </div>
-                <div class="form-group" style="margin-top: 1rem; border-top: 1px solid var(--sidebar-border); padding-top: 1rem;">
-            <label style="display: flex; justify-content: space-between; align-items: center;">
-                <span>🐙 Actividad en GitHub</span>
-            </label>
-            <div id="ticket-github-activity" style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem;">
-                <p style="margin: 0;">Selecciona o guarda un ticket para ver commits y PRs vinculados.</p>
-            </div>
-        </div>
-        <!-- SECCIÓN DE COMENTARIOS Y ADJUNTOS -->
-        <div class="form-group" style="margin-top: 1rem; border-top: 1px solid var(--sidebar-border); padding-top: 1rem;">
-            <label>💬 Comentarios y Notas</label>
-            <div id="ticket-comments-list" style="max-height: 250px; overflow-y: auto; margin-bottom: 1rem;"></div>
-
-            <form id="add-comment-form" style="display: flex; flex-direction: column; gap: 0.5rem;">
-                <textarea id="comment-text" rows="2" placeholder="Escribe un comentario..." style="width: 100%;"></textarea>
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <input type="file" id="comment-file" accept="image/*,.pdf,.zip" style="font-size: 0.8rem; width: 65%;">
-                    <button type="submit" class="btn primary small">Comentar</button>
-                </div>
-            </form>
         </div>
         <form id="ticket-form" class="panel-body">
             <input type="hidden" id="ticket-id">
@@ -165,9 +145,19 @@
                 <label>Título</label>
                 <input type="text" id="ticket-title" required placeholder="Resumen del ticket...">
             </div>
+
+            <!-- GENERADOR / COPIADOR DE NOMBRE DE RAMA -->
+            <div id="branch-generator-box" class="form-group" style="display: none; background: var(--sidebar-hover); padding: 8px 12px; border-radius: 6px;">
+                <label style="font-size: 0.75rem; color: var(--text-muted);">🌿 Nombre de Rama Sugerido</label>
+                <div style="display: flex; gap: 0.5rem; align-items: center; margin-top: 4px;">
+                    <code id="branch-name-text" style="font-size: 0.8rem; flex: 1; overflow-x: auto; white-space: nowrap;">feature/TB-x</code>
+                    <button type="button" id="btn-copy-branch" class="btn" style="padding: 2px 8px; font-size: 0.75rem;">Copiar</button>
+                </div>
+            </div>
+
             <div class="form-group">
                 <label>Descripción</label>
-                <textarea id="ticket-desc" rows="4" placeholder="Detalles de la tarea..."></textarea>
+                <textarea id="ticket-desc" rows="3" placeholder="Detalles de la tarea..."></textarea>
             </div>
             <div style="display: flex; gap: 0.5rem;">
                 <div class="form-group" style="flex: 1;">
@@ -193,11 +183,76 @@
                 <label>Etiquetas (separadas por coma)</label>
                 <input type="text" id="ticket-tags" placeholder="bug, frontend, urgente">
             </div>
+
+            <!-- ACTIVIDAD GITHUB EN EL TICKET -->
+            <div class="form-group" style="margin-top: 1rem; border-top: 1px solid var(--sidebar-border); padding-top: 1rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <label>🐙 Actividad en GitHub</label>
+                    <button type="button" id="btn-toggle-manual-commit" class="btn" style="padding: 2px 8px; font-size: 0.75rem;">+ Enlazar Commit</button>
+                </div>
+
+                <!-- VINCULACIÓN MANUAL COMMIT -->
+                <div id="manual-commit-form" style="display: none; margin-top: 0.5rem; background: var(--sidebar-hover); padding: 8px; border-radius: 6px;">
+                    <input type="text" id="manual-commit-sha" placeholder="SHA (ej: a1b2c3d)" style="width: 100%; margin-bottom: 4px; font-size: 0.8rem;">
+                    <input type="text" id="manual-commit-msg" placeholder="Mensaje del commit" style="width: 100%; margin-bottom: 4px; font-size: 0.8rem;">
+                    <input type="text" id="manual-commit-url" placeholder="URL directa en GitHub (opcional)" style="width: 100%; margin-bottom: 6px; font-size: 0.8rem;">
+                    <button type="button" id="btn-save-manual-commit" class="btn primary" style="width: 100%; padding: 4px; font-size: 0.8rem;">Guardar Enlace</button>
+                </div>
+
+                <div id="ticket-github-activity" style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem;"></div>
+            </div>
+
+            <!-- SECCIÓN DE COMENTARIOS Y ADJUNTOS -->
+            <div class="form-group" style="margin-top: 1rem; border-top: 1px solid var(--sidebar-border); padding-top: 1rem;">
+                <label>💬 Comentarios y Notas</label>
+                <div id="ticket-comments-list" style="max-height: 200px; overflow-y: auto; margin-bottom: 0.8rem;"></div>
+
+                <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                    <textarea id="comment-text" rows="2" placeholder="Escribe un comentario..." style="width: 100%;"></textarea>
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <input type="file" id="comment-file" accept="image/*,.pdf,.zip" style="font-size: 0.8rem; width: 65%;">
+                        <button type="button" id="btn-send-comment" class="btn primary" style="padding: 4px 12px; font-size: 0.85rem;">Comentar</button>
+                    </div>
+                </div>
+            </div>
+
             <div class="form-actions">
                 <button type="button" id="cancel-ticket" class="btn">Cancelar</button>
                 <button type="submit" class="btn primary">Guardar Ticket</button>
             </div>
         </form>
+    </div>
+
+    <!-- MODAL REPOSITORIOS GITHUB -->
+    <div id="github-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content" style="width: 520px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <h3 style="margin: 0;">🐙 Repositorios de GitHub</h3>
+                <button id="close-github-modal" class="icon-btn">&times;</button>
+            </div>
+
+            <form id="link-repo-form" style="margin-bottom: 1.5rem; background: var(--sidebar-hover); padding: 1rem; border-radius: 6px;">
+                <h4 style="margin-top: 0; margin-bottom: 0.8rem;">Vincular Repositorio</h4>
+                <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+                    <input type="text" id="repo-owner" placeholder="Propietario (ej: facebook)" required style="flex: 1;">
+                    <input type="text" id="repo-name" placeholder="Repositorio (ej: react)" required style="flex: 1;">
+                </div>
+                <div style="margin-bottom: 0.8rem;">
+                    <input type="password" id="repo-token" placeholder="Personal Access Token (opcional)" style="width: 100%;">
+                </div>
+                <div style="margin-bottom: 0.8rem; display: flex; align-items: center; gap: 0.5rem;">
+                    <input type="checkbox" id="repo-auto-move" checked style="cursor: pointer;">
+                    <label for="repo-auto-move" style="font-size: 0.8rem; cursor: pointer;">Mover tickets automáticamente (PR open -> In Progress, PR merged -> Done)</label>
+                </div>
+                <div style="margin-bottom: 0.8rem;">
+                    <input type="password" id="repo-webhook-secret" placeholder="Webhook Secret (opcional para prod)" style="width: 100%;">
+                </div>
+                <button type="submit" class="btn primary full-width">Verificar y Vincular</button>
+            </form>
+
+            <h4>Repositorios Vinculados</h4>
+            <div id="project-repos-list" style="max-height: 200px; overflow-y: auto;"></div>
+        </div>
     </div>
 
     <!-- MODAL NUEVO PROYECTO -->
@@ -373,31 +428,6 @@
         </div>
     </div>
 
-    <!-- MODAL REPOSITORIOS GITHUB -->
-    <div id="github-modal" class="modal-overlay" style="display: none;">
-        <div class="modal-content" style="width: 500px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                <h3 style="margin: 0;">🐙 Repositorios de GitHub</h3>
-                <button id="close-github-modal" class="icon-btn">&times;</button>
-            </div>
-
-            <form id="link-repo-form" style="margin-bottom: 1.5rem; background: var(--sidebar-hover); padding: 1rem; border-radius: 6px;">
-                <h4 style="margin-top: 0; margin-bottom: 0.8rem;">Vincular Repositorio</h4>
-                <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
-                    <input type="text" id="repo-owner" placeholder="Propietario / Org (ej: facebook)" required style="flex: 1;">
-                    <input type="text" id="repo-name" placeholder="Nombre Repositorio (ej: react)" required style="flex: 1;">
-                </div>
-                <div style="margin-bottom: 0.8rem;">
-                    <input type="password" id="repo-token" placeholder="Personal Access Token (opcional para repos privados)" style="width: 100%;">
-                </div>
-                <button type="submit" class="btn primary full-width">Verificar y Vincular</button>
-            </form>
-
-            <h4>Repositorios Vinculados</h4>
-            <div id="project-repos-list" style="max-height: 200px; overflow-y: auto;"></div>
-        </div>
-    </div>
-
-    <script src="/static/app.js?v=v8.1"></script>
+    <script src="/static/app.js?v=v8.2"></script>
 </body>
 </html>

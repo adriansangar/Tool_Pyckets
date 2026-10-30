@@ -66,6 +66,11 @@ class Repository(SQLModel, table=True):
     access_token: Optional[str] = None
     default_branch: str = "main"
     is_active: bool = Field(default=True)
+    auto_move_tickets: bool = Field(default=True)
+    webhook_secret: Optional[str] = None
+    last_synced_at: Optional[datetime] = None
+    last_sync_status: Optional[str] = Field(default="never")  # "ok", "error", "rate_limited"
+    last_sync_error: Optional[str] = None
 
 class CommitLink(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -81,7 +86,7 @@ class PullRequestLink(SQLModel, table=True):
     ticket_id: int = Field(foreign_key="ticket.id", index=True)
     pr_number: int
     title: str
-    state: str
+    state: str  # "open", "closed", "merged"
     url: str
     author: str
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

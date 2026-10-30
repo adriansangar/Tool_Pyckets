@@ -69,20 +69,20 @@ Evolución del frontend hacia una experiencia de alto rendimiento (inspiración 
 
 Objetivo: conectar Pyckets con GitHub para vincular los tickets con el código fuente y visualizar la actividad del desarrollo prácticamente en tiempo real, manteniendo una arquitectura preparada para funcionar en local y desplegarse posteriormente con Uvicorn.
 
-- [ ] **Integración con GitHub API:** implementar un servicio backend dedicado para autenticarse con GitHub y consultar repositorios, ramas, commits y pull requests.
-- [ ] **Gestión de Repositorios:** permitir conectar uno o varios repositorios de GitHub a cada proyecto de Pyckets, con configuración independiente.
-- [ ] **Panel de Actividad GitHub:** crear un feed cronológico de actividad que muestre commits recientes, autor, mensaje, rama, fecha y enlace directo a GitHub.
-- [ ] **Vinculación de Tickets y Commits:** permitir asociar commits a tickets mediante referencias como `PYK-123` en los mensajes de commit, así como mediante vinculación manual desde la interfaz.
-- [ ] **Timeline del Ticket:** añadir una sección de actividad dentro del panel de detalle de cada ticket que combine cambios de estado, comentarios, commits, ramas y pull requests relacionados.
-- [ ] **Seguimiento de Pull Requests:** mostrar las PR asociadas a cada ticket, incluyendo estado (abierta, fusionada o cerrada), autor, revisores, checks de CI y enlace directo.
-- [ ] **Detección de Ramas:** permitir crear o vincular una rama de desarrollo desde un ticket, utilizando una nomenclatura configurable como `feature/PYK-123-descripcion`.
-- [ ] **Actualización Automática:** implementar sincronización periódica con la GitHub API para el modo local y webhooks para recibir eventos en tiempo real cuando la aplicación esté publicada y sea accesible desde GitHub.
-- [ ] **Automatización del Ciclo de Vida:** permitir configurar reglas para actualizar el estado de los tickets cuando se abra o fusione una PR, sin sobrescribir cambios manuales de forma inesperada.
-- [ ] **Historial de Sincronización:** registrar la última sincronización, errores de conexión, eventos procesados y posibles duplicados para facilitar el diagnóstico.
-- [ ] **Gestión Segura de Credenciales:** almacenar tokens exclusivamente en el backend, utilizar permisos mínimos y variables de entorno o un almacén de secretos apropiado; nunca exponer credenciales en el frontend ni versionarlas en Git.
-- [ ] **Configuración por Proyecto:** añadir una sección de integraciones para conectar, desconectar y configurar repositorios, ramas por defecto y reglas de automatización.
-- [ ] **Resiliencia y Límites de API:** gestionar paginación, rate limits, reintentos, eventos duplicados y recuperación tras interrupciones de la sincronización.
-- [ ] **Pruebas de Integración:** validar autenticación, asociación de eventos con tickets, idempotencia de webhooks, errores de red y funcionamiento sin conexión a GitHub.
+- [x] **Integración con GitHub API:** implementar un servicio backend dedicado para autenticarse con GitHub y consultar repositorios, ramas, commits y pull requests.
+- [x] **Gestión de Repositorios:** permitir conectar uno o varios repositorios de GitHub a cada proyecto de Pyckets, con configuración independiente.
+- [x] **Panel de Actividad GitHub:** crear un feed cronológico de actividad que muestre commits recientes, autor, mensaje, rama, fecha y enlace directo a GitHub.
+- [x] **Vinculación de Tickets y Commits:** permitir asociar commits a tickets mediante referencias como `PYK-123` en los mensajes de commit, así como mediante vinculación manual desde la interfaz.
+- [x] **Timeline del Ticket:** añadir una sección de actividad dentro del panel de detalle de cada ticket que combine cambios de estado, comentarios, commits, ramas y pull requests relacionados.
+- [x] **Seguimiento de Pull Requests:** mostrar las PR asociadas a cada ticket, incluyendo estado (abierta, fusionada o cerrada), autor, revisores, checks de CI y enlace directo.
+- [x] **Detección de Ramas:** permitir crear o vincular una rama de desarrollo desde un ticket, utilizando una nomenclatura configurable como `feature/PYK-123-descripcion`.
+- [x] **Actualización Automática:** implementar sincronización periódica con la GitHub API para el modo local y webhooks para recibir eventos en tiempo real cuando la aplicación esté publicada y sea accesible desde GitHub.
+- [x] **Automatización del Ciclo de Vida:** permitir configurar reglas para actualizar el estado de los tickets cuando se abra o fusione una PR, sin sobrescribir cambios manuales de forma inesperada.
+- [x] **Historial de Sincronización:** registrar la última sincronización, errores de conexión, eventos procesados y posibles duplicados para facilitar el diagnóstico.
+- [x] **Gestión Segura de Credenciales:** almacenar tokens exclusivamente en el backend, utilizar permisos mínimos y variables de entorno o un almacén de secretos apropiado; nunca exponer credenciales en el frontend ni versionarlas en Git.
+- [x] **Configuración por Proyecto:** añadir una sección de integraciones para conectar, desconectar y configurar repositorios, ramas por defecto y reglas de automatización.
+- [x] **Resiliencia y Límites de API:** gestionar paginación, rate limits, reintentos, eventos duplicados y recuperación tras interrupciones de la sincronización.
+- [x] **Pruebas de Integración:** validar autenticación, asociación de eventos con tickets, idempotencia de webhooks, errores de red y funcionamiento sin conexión a GitHub.
 
 **Criterios de aceptación:**
 - Cada proyecto puede vincularse a un repositorio sin mezclar actividad de otros proyectos.

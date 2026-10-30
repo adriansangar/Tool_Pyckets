@@ -18,7 +18,6 @@ let currentProjectId = null;
 let activeSuggestionIndex = -1;
 let currentUser = null;
 
-// --- CLIENTE HTTP CON AUTENTICACIÓN AUTOMÁTICA ---
 async function authFetch(url, options = {}) {
     const token = localStorage.getItem("pyckets_token");
     options.headers = {
@@ -34,7 +33,6 @@ async function authFetch(url, options = {}) {
     return response;
 }
 
-// --- INIT Y AUTENTICACIÓN ---
 async function initBoard() {
     const isAuthenticated = await checkAuth();
     if (!isAuthenticated) return;
@@ -68,7 +66,6 @@ async function checkAuth() {
     return false;
 }
 
-// Formulario de Login
 const loginForm = document.getElementById("login-form");
 if (loginForm) {
     loginForm.addEventListener("submit", async (e) => {
@@ -112,7 +109,6 @@ if (loginForm) {
     });
 }
 
-// --- LOGOUT ---
 const btnLogout = document.getElementById("btn-logout");
 if (btnLogout) {
     btnLogout.addEventListener("click", () => {
@@ -146,12 +142,10 @@ async function fetchAndRenderTickets() {
     }
 }
 
-// --- PARSER OMNIBAR Y FILTRADO ---
 function filterTicketsByOmnibar(tickets, queryStr) {
     if (!queryStr || !queryStr.trim()) return tickets;
 
     let query = queryStr.trim();
-
     const statusMatches = [...query.matchAll(/(?:is|status):([\w_]+)/gi)];
     const statuses = statusMatches.map(m => m[1].toLowerCase());
     query = query.replace(/(?:is|status):([\w_]+)/gi, '').trim();
@@ -215,7 +209,6 @@ function applyOmnibarFilter() {
     renderTableTickets(filteredTickets, true);
 }
 
-// --- SUGERENCIAS AUTOCOMPLETADO OMNIBAR ---
 function getOmnibarSuggestions(currentWord) {
     const word = currentWord.toLowerCase();
     let options = [];
@@ -456,6 +449,7 @@ async function loadProjects() {
                         document.getElementById("stat-total").textContent = tickets.length;
                         document.getElementById("stat-done").textContent = tickets.filter(t => t.status === "done").length;
                     }
+                    await loadProjectGithubFeed();
                 }
             });
             
@@ -485,7 +479,6 @@ if (btnToggleView) {
     });
 }
 
-// --- RENDERIZADO TABLERO FIJO ---
 function renderColumns(columns) {
     if (!boardContainer) return;
     boardContainer.innerHTML = "";
@@ -611,7 +604,6 @@ function renderQuickFilters(tickets) {
     });
 }
 
-// --- DRAG & DROP Y ESTADOS ---
 async function syncTicketStatus(ticketId, newStatus) {
     await updateTicketStatus(ticketId, newStatus);
     const ticketCard = document.querySelector(`.ticket-card[data-id="${ticketId}"]`);
@@ -689,6 +681,8 @@ if (sidePanel) {
                 formTicket.reset(); 
                 document.getElementById("ticket-id").value = "";
                 panelTitle.textContent = "Nuevo Ticket";
+                document.getElementById("branch-generator-box").style.display = "none";
+                document.getElementById("manual-commit-form").style.display = "none";
             }
         }, 300);
     };
@@ -696,6 +690,7 @@ if (sidePanel) {
     if (headerNewTicketBtn) {
         headerNewTicketBtn.addEventListener("click", () => {
             panelTitle.textContent = "Nuevo Ticket";
+            document.getElementById("branch-generator-box").style.display = "none";
             sidePanel.classList.add("open");
             setTimeout(() => document.getElementById("ticket-title").focus(), 300);
         });
@@ -772,14 +767,361 @@ async function openEditPanel(ticketId) {
             document.getElementById("ticket-tags").value = ticket.tags ? ticket.tags.join(", ") : "";
             
             panelTitle.textContent = `Editar TB-${ticket.id}`;
+            
+            // Generador de rama
+            const branchBox = document.getElementById("branch-generator-box");
+            const branchText = document.getElementById("branch-name-text");
+            const slug = (ticket.title || "task").toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+            branchText.textContent = `feature/TB-${ticket.id}-${slug}`;
+            branchBox.style.display = "block";
+
             sidePanel.classList.add("open");
+
+            await loadTicketGithubActivity(ticket.id);
+            await loadTicketComments(ticket.id);
         }
     } catch (error) {
         console.error("Error cargando el ticket:", error);
     }
 }
 
-// --- OTROS NAVEGADORES Y EVENTOS ---
+// Copiar nombre de rama
+const btnCopyBranch = document.getElementById("btn-copy-branch");
+if (btnCopyBranch) {
+    btnCopyBranch.addEventListener("click", () => {
+        const branchText = document.getElementById("branch-name-text").textContent;
+        navigator.clipboard.writeText(branchText);
+        btnCopyBranch.textContent = "Copiaste! ✅";
+        setTimeout(() => btnCopyBranch.textContent = "Copiar", 2000);
+    });
+}
+
+// Vinculación manual commit
+const btnToggleManual = document.getElementById("btn-toggle-manual-commit");
+const manualForm = document.getElementById("manual-commit-form");
+if (btnToggleManual && manualForm) {
+    btnToggleManual.addEventListener("click", () => {
+        manualForm.style.display = manualForm.style.display === "none" ? "block" : "none";
+    });
+}
+
+const btnSaveManualCommit = document.getElementById("btn-save-manual-commit");
+if (btnSaveManualCommit) {
+    btnSaveManualCommit.addEventListener("click", async () => {
+        const ticketId = document.getElementById("ticket-id").value;
+        const sha = document.getElementById("manual-commit-sha").value.trim();
+        const msg = document.getElementById("manual-commit-msg").value.trim();
+        const url = document.getElementById("manual-commit-url").value.trim();
+
+        if (!ticketId || !sha || !msg) {
+            alert("Completa al menos el SHA y el mensaje.");
+            return;
+        }
+
+        try {
+            const res = await authFetch(`${API_BASE}/tickets/${ticketId}/github/commits`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ commit_sha: sha, message: msg, url: url || "#" })
+            });
+
+            if (res.ok) {
+                document.getElementById("manual-commit-sha").value = "";
+                document.getElementById("manual-commit-msg").value = "";
+                document.getElementById("manual-commit-url").value = "";
+                manualForm.style.display = "none";
+                await loadTicketGithubActivity(ticketId);
+            }
+        } catch (e) {
+            console.error("Error enlazando commit manual:", e);
+        }
+    });
+}
+
+// --- FASE 8: LÓGICA DE GITHUB Y FEEDS ---
+const githubModal = document.getElementById("github-modal");
+const btnProjectRepos = document.getElementById("btn-project-repos");
+const btnSyncGithub = document.getElementById("btn-sync-github");
+const closeGithubModal = document.getElementById("close-github-modal");
+const linkRepoForm = document.getElementById("link-repo-form");
+
+if (btnProjectRepos) {
+    btnProjectRepos.addEventListener("click", async () => {
+        if (!currentProjectId) return;
+        await renderProjectRepos();
+        githubModal.style.display = "flex";
+    });
+}
+
+if (closeGithubModal) closeGithubModal.addEventListener("click", () => githubModal.style.display = "none");
+
+async function renderProjectRepos() {
+    const list = document.getElementById("project-repos-list");
+    if (!list || !currentProjectId) return;
+
+    try {
+        const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/repositories`);
+        if (!res.ok) return;
+        const repos = await res.json();
+
+        if (repos.length === 0) {
+            list.innerHTML = "<p style='font-size: 0.85rem; color: var(--text-muted);'>No hay repositorios vinculados a este proyecto.</p>";
+            return;
+        }
+
+        list.innerHTML = repos.map(r => `
+            <div class="archived-item">
+                <div>
+                    <strong>${r.owner}/${r.repo_name}</strong>
+                    <span class="sync-status-badge ${r.last_sync_status || 'never'}">${r.last_sync_status || 'sin sincronizar'}</span>
+                    <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 2px;">
+                        ${r.last_synced_at ? 'Última sync: ' + new Date(r.last_synced_at).toLocaleString() : 'Nunca sincronizado'}
+                    </div>
+                </div>
+                <button class="btn" style="padding: 2px 8px; font-size: 0.75rem; color: #ff5630; border-color: #ff5630;" onclick="unlinkRepo(${r.id})">Desvincular</button>
+            </div>
+        `).join("");
+    } catch (e) {
+        console.error("Error cargando repositorios:", e);
+    }
+}
+
+if (linkRepoForm) {
+    linkRepoForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const owner = document.getElementById("repo-owner").value.trim();
+        const repo_name = document.getElementById("repo-name").value.trim();
+        const access_token = document.getElementById("repo-token").value.trim();
+        const auto_move_tickets = document.getElementById("repo-auto-move").checked;
+        const webhook_secret = document.getElementById("repo-webhook-secret").value.trim();
+
+        try {
+            const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/repositories`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    owner, repo_name,
+                    access_token: access_token || null,
+                    auto_move_tickets,
+                    webhook_secret: webhook_secret || null
+                })
+            });
+
+            if (res.ok) {
+                linkRepoForm.reset();
+                await renderProjectRepos();
+            } else {
+                const data = await res.json();
+                alert(data.detail || "Error al vincular el repositorio.");
+            }
+        } catch (err) {
+            console.error("Error vinculando repo:", err);
+        }
+    });
+}
+
+window.unlinkRepo = async function(repoId) {
+    if (!confirm("¿Desvincular este repositorio del proyecto?")) return;
+    try {
+        const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/repositories/${repoId}`, { method: "DELETE" });
+        if (res.ok) await renderProjectRepos();
+    } catch (err) {
+        console.error("Error desvinculando repo:", err);
+    }
+};
+
+if (btnSyncGithub) {
+    btnSyncGithub.addEventListener("click", async () => {
+        if (!currentProjectId) return;
+        btnSyncGithub.textContent = "⏳ Sincronizando...";
+        btnSyncGithub.disabled = true;
+
+        try {
+            const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/github/sync`, { method: "POST" });
+            if (res.ok) {
+                const data = await res.json();
+                alert(`✅ Sincronización completada:\n• ${data.synced_commits} nuevos commits\n• ${data.synced_prs} nuevos PRs`);
+                await loadProjectGithubFeed();
+            } else {
+                alert("Error durante la sincronización.");
+            }
+        } catch (err) {
+            console.error("Error sincronizando GitHub:", err);
+        } finally {
+            btnSyncGithub.textContent = "🔄 Sincronizar GitHub";
+            btnSyncGithub.disabled = false;
+        }
+    });
+}
+
+async function loadProjectGithubFeed() {
+    const feed = document.getElementById("project-github-feed");
+    if (!feed || !currentProjectId) return;
+
+    try {
+        const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/github/activity`);
+        if (!res.ok) return;
+        const data = await res.json();
+
+        if (data.commits.length === 0 && data.pull_requests.length === 0) {
+            feed.innerHTML = "<p style='color: var(--text-muted); font-size: 0.85rem;'>No hay actividad reciente de GitHub en este proyecto.</p>";
+            return;
+        }
+
+        let html = "";
+        data.pull_requests.forEach(pr => {
+            html += `
+                <div class="github-item">
+                    <a href="${pr.url}" target="_blank" class="github-item-title">
+                        <span>PR #${pr.pr_number} - ${pr.title} (TB-${pr.ticket_id})</span>
+                        <span class="pr-badge ${pr.state}">${pr.state}</span>
+                    </a>
+                    <div class="github-meta">por @${pr.author}</div>
+                </div>
+            `;
+        });
+
+        data.commits.forEach(c => {
+            html += `
+                <div class="github-item">
+                    <a href="${c.url}" target="_blank" class="github-item-title">
+                        <span><code>${c.commit_sha.substring(0, 7)}</code> ${c.message} (TB-${c.ticket_id})</span>
+                    </a>
+                    <div class="github-meta">por ${c.author}</div>
+                </div>
+            `;
+        });
+
+        feed.innerHTML = html;
+    } catch (e) {
+        console.error("Error cargando feed de actividad:", e);
+    }
+}
+
+async function loadTicketGithubActivity(ticketId) {
+    const container = document.getElementById("ticket-github-activity");
+    if (!container) return;
+
+    container.innerHTML = "<p style='margin:0;'>Cargando actividad de GitHub...</p>";
+
+    try {
+        const res = await authFetch(`${API_BASE}/tickets/${ticketId}/github`);
+        if (!res.ok) return;
+        const data = await res.json();
+
+        if (data.commits.length === 0 && data.pull_requests.length === 0) {
+            container.innerHTML = "<p style='margin:0;'>Sin commits ni Pull Requests vinculados a este ticket.</p>";
+            return;
+        }
+
+        let html = "";
+
+        if (data.pull_requests.length > 0) {
+            html += "<strong style='display:block; margin-bottom: 4px; color: var(--text-main);'>Pull Requests:</strong>";
+            data.pull_requests.forEach(pr => {
+                html += `
+                    <div class="github-item">
+                        <a href="${pr.url}" target="_blank" class="github-item-title">
+                            <span>#${pr.pr_number} ${pr.title}</span>
+                            <span class="pr-badge ${pr.state}">${pr.state}</span>
+                        </a>
+                        <div class="github-meta">por @${pr.author}</div>
+                    </div>
+                `;
+            });
+        }
+
+        if (data.commits.length > 0) {
+            html += "<strong style='display:block; margin-top: 8px; margin-bottom: 4px; color: var(--text-main);'>Commits:</strong>";
+            data.commits.forEach(c => {
+                html += `
+                    <div class="github-item">
+                        <a href="${c.url}" target="_blank" class="github-item-title">
+                            <span><code>${c.commit_sha.substring(0, 7)}</code> ${c.message}</span>
+                        </a>
+                        <div class="github-meta">por ${c.author}</div>
+                    </div>
+                `;
+            });
+        }
+
+        container.innerHTML = html;
+    } catch (e) {
+        console.error("Error cargando actividad de GitHub:", e);
+        container.innerHTML = "<p style='margin:0; color: #ff5630;'>Error cargando datos de GitHub.</p>";
+    }
+}
+
+async function loadTicketComments(ticketId) {
+    const list = document.getElementById("ticket-comments-list");
+    if (!list) return;
+
+    try {
+        const res = await authFetch(`${API_BASE}/tickets/${ticketId}/comments`);
+        if (!res.ok) return;
+        const comments = await res.json();
+
+        if (comments.length === 0) {
+            list.innerHTML = "<p style='font-size: 0.8rem; color: var(--text-muted);'>No hay comentarios todavía.</p>";
+            return;
+        }
+
+        list.innerHTML = comments.map(c => `
+            <div class="github-item" style="margin-bottom: 8px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                    <strong>${c.author_avatar} @${c.author_username}</strong>
+                    <span style="font-size: 0.7rem; color: var(--text-muted);">${new Date(c.created_at).toLocaleString()}</span>
+                </div>
+                <div style="font-size: 0.85rem; color: var(--text-main); white-space: pre-wrap;">${c.content}</div>
+                ${c.image_url ? `<div style="margin-top: 6px;"><a href="${c.image_url}" target="_blank"><img src="${c.image_url}" style="max-width: 100%; max-height: 180px; border-radius: 6px; border: 1px solid var(--sidebar-border);" /></a></div>` : ''}
+            </div>
+        `).join("");
+        
+        list.scrollTop = list.scrollHeight;
+    } catch (e) {
+        console.error("Error cargando comentarios:", e);
+    }
+}
+
+const btnSendComment = document.getElementById("btn-send-comment");
+if (btnSendComment) {
+    btnSendComment.addEventListener("click", async () => {
+        const ticketId = document.getElementById("ticket-id").value;
+        if (!ticketId) return;
+
+        const text = document.getElementById("comment-text").value.trim();
+        const fileInput = document.getElementById("comment-file");
+
+        if (!text && fileInput.files.length === 0) return;
+
+        const formData = new FormData();
+        formData.append("content", text);
+        if (fileInput.files.length > 0) {
+            formData.append("file", fileInput.files[0]);
+        }
+
+        try {
+            const token = localStorage.getItem("pyckets_token");
+            const res = await fetch(`${API_BASE}/tickets/${ticketId}/comments`, {
+                method: "POST",
+                headers: {
+                    ...(token ? { "Authorization": `Bearer ${token}` } : {})
+                },
+                body: formData
+            });
+
+            if (res.ok) {
+                document.getElementById("comment-text").value = "";
+                fileInput.value = "";
+                await loadTicketComments(ticketId);
+            }
+        } catch (err) {
+            console.error("Error guardando comentario:", err);
+        }
+    });
+}
+
+// OTROS NAVEGADORES Y EVENTOS
 const btnGoBoard = document.getElementById("btn-go-board");
 if (btnGoBoard) {
     btnGoBoard.addEventListener("click", () => {
@@ -883,7 +1225,7 @@ async function renderArchivedProjectsList() {
             const div = document.createElement("div");
             div.className = "archived-item";
             div.innerHTML = `
-                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                <div style="display: flex; align-align: center; gap: 0.5rem;">
                     <span class="project-color" style="background-color: ${p.color};"></span>
                     <span style="font-weight: 600;">${p.name}</span>
                 </div>
@@ -925,7 +1267,6 @@ window.deleteProjectPermanently = async function(projectId) {
     }
 };
 
-// --- ATAJOS Y MODO OSCURO ---
 document.addEventListener("keydown", (e) => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
         if (e.key === 'Escape' && sidePanel && sidePanel.classList.contains("open")) {
@@ -980,7 +1321,6 @@ if (themeToggleBtn) {
     });
 }
 
-// --- LÓGICA DE USUARIOS Y MIEMBROS ---
 const navManageUsers = document.getElementById("nav-manage-users");
 const usersModal = document.getElementById("users-modal");
 const closeUsersModal = document.getElementById("close-users-modal");
@@ -1052,7 +1392,6 @@ if (createUserForm) {
     });
 }
 
-// MIEMBROS DEL PROYECTO
 if (btnProjectMembers) {
     btnProjectMembers.addEventListener("click", async () => {
         if (!currentProjectId) return;
@@ -1109,10 +1448,17 @@ if (addMemberForm) {
         if (!userId || !currentProjectId) return;
 
         try {
-            const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/members`, {
+            const formData = new FormData();
+            formData.append("user_id", userId);
+            formData.append("role", role);
+
+            const token = localStorage.getItem("pyckets_token");
+            const res = await fetch(`${API_BASE}/projects/${currentProjectId}/members`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ user_id: parseInt(userId), role: role })
+                headers: {
+                    ...(token ? { "Authorization": `Bearer ${token}` } : {})
+                },
+                body: formData
             });
             if (res.ok) {
                 await renderProjectMembers();
@@ -1135,7 +1481,6 @@ window.removeMember = async function(userId) {
     }
 };
 
-// --- LÓGICA DE PERFIL DE USUARIO ---
 const profileModal = document.getElementById("profile-modal");
 const btnOpenProfile = document.getElementById("btn-open-profile");
 const closeProfileModal = document.getElementById("close-profile-modal");
@@ -1147,16 +1492,13 @@ function updateProfileUI(user) {
     if (!user) return;
     currentUser = user;
     
-    // Header badge
     const badge = document.getElementById("user-avatar-badge");
     const handle = document.getElementById("user-handle-text");
     if (badge) badge.textContent = user.avatar || "🚀";
     if (handle) handle.textContent = `@${user.username}`;
 
-    // Mostrar/Ocultar botón de gestión de usuarios según rol admin
     checkAdminUI();
 
-    // Aplicar tema guardado
     if (user.theme_preference === "dark") {
         document.documentElement.setAttribute("data-theme", "dark");
         if (themeToggleBtn) themeToggleBtn.textContent = "☀️";
@@ -1187,7 +1529,6 @@ if (closeProfileModal) {
     closeProfileModal.addEventListener("click", () => profileModal.style.display = "none");
 }
 
-// Selector de animalitos
 const avatarPicker = document.getElementById("avatar-picker");
 if (avatarPicker) {
     avatarPicker.querySelectorAll(".avatar-option").forEach(opt => {
@@ -1204,7 +1545,6 @@ function highlightSelectedAvatar(avatarEmoji) {
     });
 }
 
-// Guardar Perfil
 if (profileForm) {
     profileForm.addEventListener("submit", async (e) => {
         e.preventDefault();
@@ -1235,7 +1575,6 @@ if (profileForm) {
     });
 }
 
-// Cambiar Contraseña
 if (passwordForm) {
     passwordForm.addEventListener("submit", async (e) => {
         e.preventDefault();
@@ -1264,250 +1603,5 @@ if (passwordForm) {
         }
     });
 }
-
-// --- FASE 8: LÓGICA DE GITHUB ---
-const githubModal = document.getElementById("github-modal");
-const btnProjectRepos = document.getElementById("btn-project-repos");
-const btnSyncGithub = document.getElementById("btn-sync-github");
-const closeGithubModal = document.getElementById("close-github-modal");
-const linkRepoForm = document.getElementById("link-repo-form");
-
-if (btnProjectRepos) {
-    btnProjectRepos.addEventListener("click", async () => {
-        if (!currentProjectId) return;
-        await renderProjectRepos();
-        githubModal.style.display = "flex";
-    });
-}
-
-if (closeGithubModal) closeGithubModal.addEventListener("click", () => githubModal.style.display = "none");
-
-async function renderProjectRepos() {
-    const list = document.getElementById("project-repos-list");
-    if (!list || !currentProjectId) return;
-
-    try {
-        const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/repositories`);
-        if (!res.ok) return;
-        const repos = await res.json();
-
-        if (repos.length === 0) {
-            list.innerHTML = "<p style='font-size: 0.85rem; color: var(--text-muted);'>No hay repositorios vinculados a este proyecto.</p>";
-            return;
-        }
-
-        list.innerHTML = repos.map(r => `
-            <div class="archived-item">
-                <div>
-                    <strong>${r.owner}/${r.repo_name}</strong>
-                    <span style="font-size: 0.75rem; color: var(--text-muted);">(${r.default_branch})</span>
-                </div>
-                <button class="btn" style="padding: 2px 8px; font-size: 0.75rem; color: #ff5630; border-color: #ff5630;" onclick="unlinkRepo(${r.id})">Desvincular</button>
-            </div>
-        `).join("");
-    } catch (e) {
-        console.error("Error cargando repositorios:", e);
-    }
-}
-
-if (linkRepoForm) {
-    linkRepoForm.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const owner = document.getElementById("repo-owner").value.trim();
-        const repo_name = document.getElementById("repo-name").value.trim();
-        const access_token = document.getElementById("repo-token").value.trim();
-
-        try {
-            const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/repositories`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ owner, repo_name, access_token: access_token || null })
-            });
-
-            if (res.ok) {
-                linkRepoForm.reset();
-                await renderProjectRepos();
-            } else {
-                const data = await res.json();
-                alert(data.detail || "Error al vincular el repositorio.");
-            }
-        } catch (err) {
-            console.error("Error vinculando repo:", err);
-        }
-    });
-}
-
-window.unlinkRepo = async function(repoId) {
-    if (!confirm("¿Desvincular este repositorio del proyecto?")) return;
-    try {
-        const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/repositories/${repoId}`, { method: "DELETE" });
-        if (res.ok) await renderProjectRepos();
-    } catch (err) {
-        console.error("Error desvinculando repo:", err);
-    }
-};
-
-if (btnSyncGithub) {
-    btnSyncGithub.addEventListener("click", async () => {
-        if (!currentProjectId) return;
-        btnSyncGithub.textContent = "⏳ Sincronizando...";
-        btnSyncGithub.disabled = true;
-
-        try {
-            const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/github/sync`, { method: "POST" });
-            if (res.ok) {
-                const data = await res.json();
-                alert(`✅ Sincronización completada:\n• ${data.synced_commits} nuevos commits\n• ${data.synced_prs} nuevos PRs`);
-            } else {
-                alert("Error durante la sincronización.");
-            }
-        } catch (err) {
-            console.error("Error sincronizando GitHub:", err);
-        } finally {
-            btnSyncGithub.textContent = "🔄 Sincronizar GitHub";
-            btnSyncGithub.disabled = false;
-        }
-    });
-}
-
-// Cargar commits y PRs asociados al abrir el panel lateral del ticket
-async function loadTicketGithubActivity(ticketId) {
-    const container = document.getElementById("ticket-github-activity");
-    if (!container) return;
-
-    container.innerHTML = "<p style='margin:0;'>Cargando actividad de GitHub...</p>";
-
-    try {
-        const res = await authFetch(`${API_BASE}/tickets/${ticketId}/github`);
-        if (!res.ok) return;
-        const data = await res.json();
-
-        if (data.commits.length === 0 && data.pull_requests.length === 0) {
-            container.innerHTML = "<p style='margin:0;'>Sin commits ni Pull Requests vinculados a este ticket.</p>";
-            return;
-        }
-
-        let html = "";
-
-        if (data.pull_requests.length > 0) {
-            html += "<strong style='display:block; margin-bottom: 4px; color: var(--text-main);'>Pull Requests:</strong>";
-            data.pull_requests.forEach(pr => {
-                html += `
-                    <div class="github-item">
-                        <a href="${pr.url}" target="_blank" class="github-item-title">
-                            <span>#${pr.pr_number} ${pr.title}</span>
-                            <span class="pr-badge ${pr.state}">${pr.state}</span>
-                        </a>
-                        <div class="github-meta">por @${pr.author}</div>
-                    </div>
-                `;
-            });
-        }
-
-        if (data.commits.length > 0) {
-            html += "<strong style='display:block; margin-top: 8px; margin-bottom: 4px; color: var(--text-main);'>Commits:</strong>";
-            data.commits.forEach(c => {
-                html += `
-                    <div class="github-item">
-                        <a href="${c.url}" target="_blank" class="github-item-title">
-                            <span><code>${c.commit_sha.substring(0, 7)}</code> ${c.message}</span>
-                        </a>
-                        <div class="github-meta">por ${c.author}</div>
-                    </div>
-                `;
-            });
-        }
-
-        container.innerHTML = html;
-    } catch (e) {
-        console.error("Error cargando actividad de GitHub:", e);
-        container.innerHTML = "<p style='margin:0; color: #ff5630;'>Error cargando datos de GitHub.</p>";
-    }
-}
-
-// Conectar con la apertura de edicion de ticket
-const baseOpenEditPanel = openEditPanel;
-openEditPanel = async function(ticketId) {
-    await baseOpenEditPanel(ticketId);
-    await loadTicketGithubActivity(ticketId);
-};
-
-// --- LÓGICA DE COMENTARIOS EN TICKETS ---
-async function loadTicketComments(ticketId) {
-    const list = document.getElementById("ticket-comments-list");
-    if (!list) return;
-
-    try {
-        const res = await authFetch(`${API_BASE}/tickets/${ticketId}/comments`);
-        if (!res.ok) return;
-        const comments = await res.json();
-
-        if (comments.length === 0) {
-            list.innerHTML = "<p style='font-size: 0.8rem; color: var(--text-muted);'>No hay comentarios todavía.</p>";
-            return;
-        }
-
-        list.innerHTML = comments.map(c => `
-            <div class="github-item" style="margin-bottom: 8px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                    <strong>${c.author_avatar} @${c.author_username}</strong>
-                    <span style="font-size: 0.7rem; color: var(--text-muted);">${new Date(c.created_at).toLocaleString()}</span>
-                </div>
-                <div style="font-size: 0.85rem; color: var(--text-main); white-space: pre-wrap;">${c.content}</div>
-                ${c.image_url ? `<div style="margin-top: 6px;"><a href="${c.image_url}" target="_blank"><img src="${c.image_url}" style="max-width: 100%; max-height: 180px; border-radius: 6px; border: 1px solid var(--sidebar-border);" /></a></div>` : ''}
-            </div>
-        `).join("");
-        
-        list.scrollTop = list.scrollHeight;
-    } catch (e) {
-        console.error("Error cargando comentarios:", e);
-    }
-}
-
-const addCommentForm = document.getElementById("add-comment-form");
-if (addCommentForm) {
-    addCommentForm.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const ticketId = document.getElementById("ticket-id").value;
-        if (!ticketId) return;
-
-        const text = document.getElementById("comment-text").value.trim();
-        const fileInput = document.getElementById("comment-file");
-
-        if (!text && fileInput.files.length === 0) return;
-
-        const formData = new FormData();
-        formData.append("content", text);
-        if (fileInput.files.length > 0) {
-            formData.append("file", fileInput.files[0]);
-        }
-
-        try {
-            const token = localStorage.getItem("pyckets_token");
-            const res = await fetch(`${API_BASE}/tickets/${ticketId}/comments`, {
-                method: "POST",
-                headers: {
-                    ...(token ? { "Authorization": `Bearer ${token}` } : {})
-                },
-                body: formData
-            });
-
-            if (res.ok) {
-                document.getElementById("comment-text").value = "";
-                fileInput.value = "";
-                await loadTicketComments(ticketId);
-            }
-        } catch (err) {
-            console.error("Error guardando comentario:", err);
-        }
-    });
-}
-
-// Conectar carga de comentarios al abrir edición de ticket
-const prevOpenEditPanel = openEditPanel;
-openEditPanel = async function(ticketId) {
-    await prevOpenEditPanel(ticketId);
-    await loadTicketComments(ticketId);
-};
 
 document.addEventListener("DOMContentLoaded", initBoard);
