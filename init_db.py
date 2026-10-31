@@ -1,15 +1,21 @@
-from sqlmodel import Session
+import os
+import secrets
+from sqlmodel import Session, select
 from database import create_db_and_tables, engine
 from models import Column, Epic, Project, User, ProjectMember, ProjectRole
 from auth import get_password_hash
 
 def create_seed_data():
     with Session(engine) as session:
-        # 1. Crear usuario por defecto
+        if session.exec(select(User).where(User.username == "adrian")).first():
+            print("La base de datos ya estaba inicializada; no se hace nada.")
+            return
+        # 1. Crear usuario por defecto (contraseña desde entorno o aleatoria)
+        admin_password = os.getenv("PYCKETS_ADMIN_PASSWORD") or secrets.token_urlsafe(12)
         admin_user = User(
             username="adrian",
             email="adrian@pyckets.local",
-            hashed_password=get_password_hash("admin123"),
+            hashed_password=get_password_hash(admin_password),
             is_superuser=True
         )
         session.add(admin_user)
@@ -39,7 +45,7 @@ def create_seed_data():
         session.add_all([m1, m2])
         session.commit()
         
-        print("Base de datos inicializada con autenticación y usuario 'adrian' (Password: admin123).")
+        print(f"Base de datos inicializada. Usuario: adrian  Contraseña: {admin_password}  (cámbiala desde tu perfil)")
 
 if __name__ == "__main__":
     print("Creando base de datos...")

@@ -1,4 +1,5 @@
 import os
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 import bcrypt
@@ -10,7 +11,30 @@ from sqlmodel import Session, select
 from database import get_session
 from models import User, ProjectMember, ProjectRole
 
-SECRET_KEY = os.getenv("SECRET_KEY", "pyckets_super_secret_dev_key_change_in_prod_2026")
+def _load_secret_key() -> str:
+    """SECRET_KEY desde entorno; si no existe, se genera una aleatoria y se guarda junto a la BD."""
+    env_key = os.getenv("SECRET_KEY")
+    if env_key:
+        return env_key
+    db_dir = os.path.dirname(os.path.abspath(os.getenv("PYCKETS_DB_PATH", "pyckets.db")))
+    path = os.getenv("PYCKETS_SECRET_FILE", os.path.join(db_dir, ".pyckets_secret"))
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            key = f.read().strip()
+            if key:
+                return key
+    except FileNotFoundError:
+        pass
+    key = secrets.token_urlsafe(48)
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(key)
+    except OSError:
+        print("⚠️ No se pudo guardar la clave secreta; las sesiones se perderán al reiniciar.")
+    return key
+
+SECRET_KEY = _load_secret_key()
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 1 semana
 
