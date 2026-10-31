@@ -7,7 +7,6 @@ const btnToggleView = document.getElementById("toggle-view");
 const navGlobalAll = document.getElementById("nav-global-all");
 const navGlobalMine = document.getElementById("nav-global-mine");
 const headerNewTicketBtn = document.getElementById("header-new-ticket");
-const focusSearchBtn = document.getElementById("focus-search");
 const searchInput = document.getElementById("search-filter");
 const suggestionsContainer = document.getElementById("omnibar-suggestions");
 
@@ -15,8 +14,42 @@ let isListView = false;
 let globalColumns = [];
 let rawTickets = [];
 let currentProjectId = null;
-let activeSuggestionIndex = -1;
 let currentUser = null;
+let selectedTicketIds = new Set();
+let activeSuggestionIndex = -1;
+let editingTicket = null;
+
+// ---------- Helpers ----------
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const norm = (v) => String(v ?? "").toLowerCase();
+const titleCase = (s) => { s = String(s ?? ""); return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase(); };
+const PRIO_LABEL = { urgent: "Urgente", high: "Alta", medium: "Media", low: "Baja" };
+const TYPE_LABEL = { task: "Tarea", bug: "Bug", feature: "Feature", epic: "Épica" };
+const statusIdOf = (name) => String(name).toLowerCase().replace(/\s+/g, "_");
+function statusLabel(id) {
+    const col = globalColumns.find(c => statusIdOf(c.name) === norm(id));
+    return titleCase(col ? col.name : String(id || "").replace(/_/g, " "));
+}
+function setSelectValue(id, value, fallback) {
+    const el = document.getElementById(id);
+    el.value = String(value || fallback).toUpperCase();   // la API devuelve minúsculas, los <option> van en mayúsculas
+    if (el.selectedIndex === -1) el.value = fallback;
+}
+function dueChip(t) {
+    if (!t.due_date) return "";
+    const d = String(t.due_date).slice(0, 10);
+    const today = new Date().toLocaleDateString("sv-SE");
+    const late = d < today && norm(t.status) !== "done";
+    const label = new Date(d + "T00:00:00").toLocaleDateString("es-ES", { day: "numeric", month: "short" });
+    return `<span class="due-chip ${late ? "overdue" : ""}" title="Fecha límite">${label}</span>`;
+}
+function updateColumnCounts() {
+    document.querySelectorAll(".column-content").forEach(c => {
+        const el = document.getElementById("count-" + c.dataset.status);
+        if (el) el.textContent = c.querySelectorAll(".ticket-card").length;
+    });
+}
+
 
 async function authFetch(url, options = {}) {
     const token = localStorage.getItem("pyckets_token");
@@ -89,8 +122,7 @@ if (loginForm) {
                 const data = await res.json();
                 localStorage.setItem("pyckets_token", data.access_token);
                 if (errorDiv) errorDiv.style.display = "none";
-                const loginScreen = document.getElementById("login-screen");
-                if (loginScreen) loginScreen.style.display = "none";
+                document.getElementById("login-screen").style.display = "none";
                 await initBoard();
             } else {
                 const data = await res.json();
@@ -100,11 +132,7 @@ if (loginForm) {
                 }
             }
         } catch (err) {
-            console.error("Error en el inicio de sesión:", err);
-            if (errorDiv) {
-                errorDiv.textContent = "Error conectando con el servidor";
-                errorDiv.style.display = "block";
-            }
+            console.error("Error iniciando sesión:", err);
         }
     });
 }
@@ -123,7 +151,6 @@ if (btnLogout) {
 async function fetchAndRenderTickets() {
     try {
         const ticketUrl = currentProjectId ? `${API_BASE}/tickets?project_id=${currentProjectId}` : `${API_BASE}/tickets`;
-        
         const [columnsRes, ticketsRes] = await Promise.all([
             authFetch(`${API_BASE}/columns`),
             authFetch(ticketUrl)
@@ -132,71 +159,40 @@ async function fetchAndRenderTickets() {
         if (!columnsRes.ok || !ticketsRes.ok) return;
 
         globalColumns = await columnsRes.json();
+        fillStatusOptions();
         rawTickets = await ticketsRes.json();
 
         applyOmnibarFilter();
         renderQuickFilters(rawTickets);
         setupDragAndDrop();
     } catch (error) {
-        console.error("Error crítico cargando el tablero:", error);
+        console.error("Error cargando el tablero:", error);
     }
 }
 
+function parseOmnibar(q) {
+    const f = { text: [], assignee: [], priority: [], status: [], label: [], type: [] };
+    String(q || "").trim().split(/\s+/).filter(Boolean).forEach(tok => {
+        const m = tok.match(/^(assignee|priority|status|label|type):(.+)$/i);
+        if (m) f[m[1].toLowerCase()].push(norm(m[2]));
+        else if (tok[0] === "@" && tok.length > 1) f.assignee.push(norm(tok.slice(1)));
+        else if (tok[0] === "#" && tok.length > 1) f.label.push(norm(tok.slice(1)));
+        else f.text.push(norm(tok));
+    });
+    return f;
+}
+
 function filterTicketsByOmnibar(tickets, queryStr) {
-    if (!queryStr || !queryStr.trim()) return tickets;
-
-    let query = queryStr.trim();
-    const statusMatches = [...query.matchAll(/(?:is|status):([\w_]+)/gi)];
-    const statuses = statusMatches.map(m => m[1].toLowerCase());
-    query = query.replace(/(?:is|status):([\w_]+)/gi, '').trim();
-
-    const assigneeMatches = [...query.matchAll(/(?:@|assignee:)(\w+)/gi)];
-    const assignees = assigneeMatches.map(m => m[1].toLowerCase());
-    query = query.replace(/(?:@|assignee:)(\w+)/gi, '').trim();
-
-    const tagMatches = [...query.matchAll(/(?:#|tag:)(\w+)/gi)];
-    const tags = tagMatches.map(m => m[1].toLowerCase());
-    query = query.replace(/(?:#|tag:)(\w+)/gi, '').trim();
-
-    const epicMatches = [...query.matchAll(/epic:(?:"([^"]+)"|(\w+))/gi)];
-    const epics = epicMatches.map(m => (m[1] || m[2]).toLowerCase());
-    query = query.replace(/epic:(?:"([^"]+)"|(\w+))/gi, '').trim();
-
-    const textSearch = query.toLowerCase().trim();
-
-    return tickets.filter(ticket => {
-        if (statuses.length > 0) {
-            const ticketStatus = (ticket.status || 'todo').toLowerCase();
-            const matchesStatus = statuses.some(s => 
-                ticketStatus === s || 
-                ticketStatus.includes(s) ||
-                (s === 'progress' && ticketStatus === 'in_progress')
-            );
-            if (!matchesStatus) return false;
-        }
-
-        if (assignees.length > 0) {
-            const ticketAssignee = (ticket.assignee || '').toLowerCase();
-            if (!assignees.some(a => ticketAssignee.includes(a))) return false;
-        }
-
-        if (tags.length > 0) {
-            const ticketTags = (ticket.tags || []).map(t => t.toLowerCase());
-            if (!tags.some(t => ticketTags.includes(t))) return false;
-        }
-
-        if (epics.length > 0) {
-            const ticketEpic = (ticket.epic || '').toLowerCase();
-            if (!epics.some(e => ticketEpic.includes(e))) return false;
-        }
-
-        if (textSearch) {
-            const titleMatch = (ticket.title || '').toLowerCase().includes(textSearch);
-            const descMatch = (ticket.description || '').toLowerCase().includes(textSearch);
-            if (!titleMatch && !descMatch) return false;
-        }
-
-        return true;
+    const f = parseOmnibar(queryStr);
+    return tickets.filter(t => {
+        const tags = (t.tags || []).map(norm);
+        const hay = norm(`tb-${t.id} ${t.title} ${t.assignee || ""} ${tags.join(" ")}`);
+        return f.assignee.every(a => norm(t.assignee).includes(a))
+            && f.priority.every(p => norm(t.priority) === p)
+            && f.status.every(s => norm(t.status) === s.replace(/\s+/g, "_"))
+            && f.type.every(s => norm(t.ticket_type) === s)
+            && f.label.every(l => tags.some(tg => tg.includes(l)))
+            && f.text.every(w => hay.includes(w));
     });
 }
 
@@ -207,209 +203,13 @@ function applyOmnibarFilter() {
     renderColumns(globalColumns);
     renderTickets(filteredTickets);
     renderTableTickets(filteredTickets, true);
-}
-
-function getOmnibarSuggestions(currentWord) {
-    const word = currentWord.toLowerCase();
-    let options = [];
-
-    if (word.startsWith("@")) {
-        const query = word.slice(1);
-        const assignees = [...new Set(rawTickets.map(t => t.assignee).filter(Boolean))];
-        options = assignees
-            .filter(a => a.toLowerCase().includes(query))
-            .map(a => ({ value: `@${a}`, label: `@${a}`, type: "Asignado" }));
-    } else if (word.startsWith("#")) {
-        const query = word.slice(1);
-        const tags = [...new Set(rawTickets.flatMap(t => t.tags || []))];
-        options = tags
-            .filter(t => t.toLowerCase().includes(query))
-            .map(t => ({ value: `#${t}`, label: `#${t}`, type: "Etiqueta" }));
-    } else if (word.startsWith("is:") || word.startsWith("status:")) {
-        const prefix = word.startsWith("is:") ? "is:" : "status:";
-        const query = word.slice(prefix.length);
-        const statuses = ["todo", "halted", "in_progress", "done"];
-        options = statuses
-            .filter(s => s.includes(query))
-            .map(s => ({ value: `${prefix}${s}`, label: `${prefix}${s}`, type: "Estado" }));
-    } else if (word.startsWith("epic:")) {
-        const query = word.slice(5).replace(/"/g, '');
-        const epics = [...new Set(rawTickets.map(t => t.epic).filter(Boolean))];
-        options = epics
-            .filter(e => e.toLowerCase().includes(query))
-            .map(e => ({ 
-                value: e.includes(" ") ? `epic:"${e}"` : `epic:${e}`, 
-                label: `epic:${e}`, 
-                type: "Epic" 
-            }));
-    } else if (word === "") {
-        options = [
-            { value: "@", label: "@asignado", type: "Filtro" },
-            { value: "#", label: "#etiqueta", type: "Filtro" },
-            { value: "is:", label: "is:estado", type: "Filtro" },
-            { value: "epic:", label: "epic:nombre", type: "Filtro" }
-        ];
-    }
-
-    return options;
-}
-
-function showOmnibarSuggestions() {
-    if (!searchInput || !suggestionsContainer) return;
-
-    const cursorPos = searchInput.selectionStart;
-    const textBeforeCursor = searchInput.value.slice(0, cursorPos);
-    const words = textBeforeCursor.split(/\s+/);
-    const currentWord = words[words.length - 1];
-
-    const suggestions = getOmnibarSuggestions(currentWord);
-
-    if (suggestions.length === 0) {
-        suggestionsContainer.style.display = "none";
-        activeSuggestionIndex = -1;
-        return;
-    }
-
-    activeSuggestionIndex = 0;
-    suggestionsContainer.innerHTML = suggestions.map((item, index) => `
-        <div class="suggestion-item ${index === 0 ? 'selected' : ''}" data-value="${item.value}">
-            <span>${item.label}</span>
-            <span class="suggestion-badge">${item.type}</span>
-        </div>
-    `).join("");
-
-    suggestionsContainer.style.display = "block";
-
-    suggestionsContainer.querySelectorAll(".suggestion-item").forEach(item => {
-        item.addEventListener("click", () => applySuggestion(item.dataset.value));
-    });
-}
-
-function applySuggestion(selectedValue) {
-    const cursorPos = searchInput.selectionStart;
-    const text = searchInput.value;
-    const textBeforeCursor = text.slice(0, cursorPos);
-    const textAfterCursor = text.slice(cursorPos);
-    
-    const words = textBeforeCursor.split(/\s+/);
-    words[words.length - 1] = selectedValue;
-
-    const newTextBefore = words.join(" ") + " ";
-    searchInput.value = newTextBefore + textAfterCursor;
-    
-    const newCursorPos = newTextBefore.length;
-    searchInput.setSelectionRange(newCursorPos, newCursorPos);
-    
-    suggestionsContainer.style.display = "none";
-    searchInput.focus();
-    applyOmnibarFilter();
+    updateColumnCounts();
 }
 
 if (searchInput) {
-    searchInput.addEventListener("input", () => {
-        applyOmnibarFilter();
-        showOmnibarSuggestions();
-    });
-
-    searchInput.addEventListener("focus", () => showOmnibarSuggestions());
-
-    searchInput.addEventListener("keydown", (e) => {
-        if (!suggestionsContainer || suggestionsContainer.style.display === "none") return;
-
-        const items = suggestionsContainer.querySelectorAll(".suggestion-item");
-        if (items.length === 0) return;
-
-        if (e.key === "ArrowDown") {
-            e.preventDefault();
-            activeSuggestionIndex = (activeSuggestionIndex + 1) % items.length;
-            updateSelectedSuggestion(items);
-        } else if (e.key === "ArrowUp") {
-            e.preventDefault();
-            activeSuggestionIndex = (activeSuggestionIndex - 1 + items.length) % items.length;
-            updateSelectedSuggestion(items);
-        } else if (e.key === "Enter" || e.key === "Tab") {
-            if (activeSuggestionIndex >= 0 && items[activeSuggestionIndex]) {
-                e.preventDefault();
-                applySuggestion(items[activeSuggestionIndex].dataset.value);
-            }
-        } else if (e.key === "Escape") {
-            suggestionsContainer.style.display = "none";
-        }
-    });
+    searchInput.addEventListener("input", () => applyOmnibarFilter());
 }
 
-function updateSelectedSuggestion(items) {
-    items.forEach((item, index) => {
-        item.classList.toggle("selected", index === activeSuggestionIndex);
-        if (index === activeSuggestionIndex) {
-            item.scrollIntoView({ block: "nearest" });
-        }
-    });
-}
-
-document.addEventListener("click", (e) => {
-    if (suggestionsContainer && !e.target.closest(".search-container")) {
-        suggestionsContainer.style.display = "none";
-    }
-});
-
-// --- NAVEGACIÓN Y VISTAS GLOBALES ---
-if (focusSearchBtn && searchInput) {
-    focusSearchBtn.addEventListener("click", () => searchInput.focus());
-}
-
-if (navGlobalAll) {
-    navGlobalAll.addEventListener("click", (e) => {
-        e.preventDefault();
-        document.querySelectorAll(".nav-item").forEach(el => el.classList.remove("active"));
-        navGlobalAll.classList.add("active");
-        
-        currentProjectId = null;
-        document.getElementById("board-title").textContent = "Todos los Tickets";
-        if (headerNewTicketBtn) headerNewTicketBtn.style.display = "none";
-        
-        document.getElementById("project-home").style.display = "none";
-        document.getElementById("quick-filters").style.display = "flex";
-        
-        if (isListView) {
-            document.getElementById("list-container").style.display = "block";
-            boardContainer.style.display = "none";
-        } else {
-            boardContainer.style.display = "flex";
-            document.getElementById("list-container").style.display = "none";
-        }
-        
-        fetchAndRenderTickets();
-    });
-}
-
-if (navGlobalMine) {
-    navGlobalMine.addEventListener("click", async (e) => {
-        e.preventDefault();
-        document.querySelectorAll(".nav-item").forEach(el => el.classList.remove("active"));
-        navGlobalMine.classList.add("active");
-        
-        currentProjectId = null;
-        document.getElementById("board-title").textContent = "Mis Tickets (Asignados a mí)";
-        if (headerNewTicketBtn) headerNewTicketBtn.style.display = "none";
-        
-        document.getElementById("project-home").style.display = "none";
-        document.getElementById("quick-filters").style.display = "flex";
-        
-        if (isListView) {
-            document.getElementById("list-container").style.display = "block";
-            boardContainer.style.display = "none";
-        } else {
-            boardContainer.style.display = "flex";
-            document.getElementById("list-container").style.display = "none";
-        }
-        
-        if (searchInput) searchInput.value = "@adrian";
-        fetchAndRenderTickets();
-    });
-}
-
-// --- CARGA DE PROYECTOS ---
 async function loadProjects() {
     try {
         const res = await authFetch(`${API_BASE}/projects`);
@@ -423,7 +223,7 @@ async function loadProjects() {
             const a = document.createElement("a");
             a.className = "nav-item project-link";
             a.href = "#";
-            a.innerHTML = `<span class="project-color" style="background-color: ${p.color};"></span> <span class="text">${p.name}</span>`;
+            a.innerHTML = `<span class="project-color" style="background-color: ${esc(p.color)};"></span> <span class="text">${esc(p.name)}</span>`;
             
             a.addEventListener("click", async (e) => {
                 e.preventDefault();
@@ -432,7 +232,7 @@ async function loadProjects() {
                 
                 currentProjectId = p.id;
                 document.getElementById("board-title").textContent = p.name;
-                if (headerNewTicketBtn) headerNewTicketBtn.style.display = "inline-flex"; 
+                if (headerNewTicketBtn) headerNewTicketBtn.style.display = "inline-flex"; setProjectChrome(true); 
                 
                 boardContainer.style.display = "none";
                 if (listContainer) listContainer.style.display = "none";
@@ -446,8 +246,7 @@ async function loadProjects() {
                     const tRes = await authFetch(`${API_BASE}/tickets?project_id=${currentProjectId}`);
                     if (tRes.ok) {
                         const tickets = await tRes.json();
-                        document.getElementById("stat-total").textContent = tickets.length;
-                        document.getElementById("stat-done").textContent = tickets.filter(t => t.status === "done").length;
+                        renderProjectDashboard(tickets);
                     }
                     await loadProjectGithubFeed();
                 }
@@ -460,7 +259,6 @@ async function loadProjects() {
     }
 }
 
-// --- TOGGLE VISTAS ---
 if (btnToggleView) {
     btnToggleView.addEventListener("click", () => {
         isListView = !isListView;
@@ -482,147 +280,180 @@ if (btnToggleView) {
 function renderColumns(columns) {
     if (!boardContainer) return;
     boardContainer.innerHTML = "";
-    
     columns.forEach(col => {
-        const statusId = col.name.toLowerCase().replace(/\s+/g, '_');
+        const statusId = statusIdOf(col.name);
         const colDiv = document.createElement("div");
         colDiv.className = "kanban-column";
-
+        colDiv.dataset.status = statusId;
         colDiv.innerHTML = `
             <div class="column-header">
-                <span>${col.name}</span>
+                <span class="col-title"><span class="status-dot"></span>${esc(titleCase(col.name))}</span>
+                <span class="column-count" id="count-${statusId}">0</span>
             </div>
-            <div class="column-content" data-status="${statusId}" id="col-${statusId}"></div>
-        `;
+            <div class="column-content" data-status="${statusId}" id="col-${statusId}"></div>`;
         boardContainer.appendChild(colDiv);
     });
 }
 
 function renderTickets(tickets) {
     tickets.forEach(ticket => {
-        const status = ticket.status || "todo";
-        const colContent = document.querySelector(`.column-content[data-status="${status}"]`);
-        
-        if (colContent) {
-            const ticketDiv = document.createElement("div");
-            ticketDiv.className = "ticket-card";
-            ticketDiv.draggable = true;
-            ticketDiv.dataset.id = ticket.id;
-            
-            ticketDiv.addEventListener("dblclick", () => openEditPanel(ticket.id));
-
-            const epicHtml = ticket.epic ? `<div class="epic-badge">${ticket.epic}</div>` : '';
-            const assigneeHtml = ticket.assignee ? `<div class="assignee-avatar" title="${ticket.assignee}">${ticket.assignee.charAt(0).toUpperCase()}</div>` : '';
-            const dateHtml = ticket.due_date ? `<span>📅 ${ticket.due_date}</span>` : '';
-
-            ticketDiv.innerHTML = `
-                ${epicHtml}
-                <div class="ticket-title">${ticket.title}</div>
-                ${ticket.description ? `<div class="ticket-desc">${ticket.description}</div>` : ""}
-                <div class="tags-container">
-                    ${ticket.tags && ticket.tags.length > 0 ? ticket.tags.map(tag => `<span class="tag-badge">${tag}</span>`).join("") : ""}
+        const colContent = document.querySelector(`.column-content[data-status="${ticket.status || "todo"}"]`);
+        if (!colContent) return;
+        const prio = norm(ticket.priority) || "medium";
+        const type = norm(ticket.ticket_type) || "task";
+        const div = document.createElement("div");
+        div.className = "ticket-card";
+        div.draggable = true;
+        div.dataset.id = ticket.id;
+        div.addEventListener("click", () => openEditPanel(ticket.id));
+        div.innerHTML = `
+            <div class="ticket-top">
+                <span class="ticket-key">TB-${ticket.id}</span>
+                ${ticket.epic ? `<span class="epic-badge">${esc(ticket.epic)}</span>` : ""}
+            </div>
+            <div class="ticket-title">${esc(ticket.title)}</div>
+            ${ticket.description ? `<div class="ticket-desc">${esc(ticket.description)}</div>` : ""}
+            <div class="tags-container">${(ticket.tags || []).map(t => `<span class="tag-badge">#${esc(t)}</span>`).join("")}</div>
+            <div class="ticket-meta">
+                <div class="meta-left">
+                    <span class="priority-badge priority-${esc(prio)}">${PRIO_LABEL[prio] || esc(titleCase(prio))}</span>
+                    <span class="type-badge">${TYPE_LABEL[type] || esc(titleCase(type))}</span>
+                    ${dueChip(ticket)}
+                    ${ticket.story_points ? `<span class="points-chip" title="Story points">${ticket.story_points}</span>` : ""}
                 </div>
-                <div class="ticket-meta">
-                    ${dateHtml}
-                    ${assigneeHtml}
-                </div>
-            `;
-            colContent.appendChild(ticketDiv);
-        }
+                ${ticket.assignee ? `<div class="assignee-avatar" title="${esc(ticket.assignee)}">${esc(ticket.assignee.charAt(0).toUpperCase())}</div>` : ""}
+            </div>`;
+        colContent.appendChild(div);
     });
 }
 
 function renderTableTickets(tickets, clearTable = false) {
     if (!ticketListBody) return;
     if (clearTable) ticketListBody.innerHTML = "";
-
+    if (!tickets.length) {
+        ticketListBody.innerHTML = '<tr class="empty-row"><td colspan="8">No hay tickets que coincidan con el filtro.</td></tr>';
+        return;
+    }
     tickets.forEach(ticket => {
+        const prio = norm(ticket.priority) || "medium";
+        const type = norm(ticket.ticket_type) || "task";
+        const st = norm(ticket.status) || "todo";
         const tr = document.createElement("tr");
-        const currentStatus = ticket.status || "todo";
-
-        const optionsHtml = globalColumns.map(col => {
-            const statusId = col.name.toLowerCase().replace(/\s+/g, '_');
-            const isSelected = (currentStatus === statusId) ? "selected" : "";
-            return `<option value="${statusId}" ${isSelected}>${col.name}</option>`;
-        }).join("");
-
         tr.innerHTML = `
-            <td style="color: var(--text-muted); font-size: 0.85rem;">TB-${ticket.id}</td>
-            <td style="font-weight: 600; color: var(--primary); cursor: pointer;" onclick="openEditPanel(${ticket.id})">${ticket.title}</td>
-            <td>
-                <select class="status-select" onchange="syncTicketStatus(${ticket.id}, this.value)">
-                    ${optionsHtml}
-                </select>
-            </td>
-            <td><span class="epic-badge">${ticket.epic || '-'}</span></td>
-            <td style="font-size: 0.85rem;">${ticket.assignee || '-'}</td>
-            <td style="font-size: 0.85rem; color: var(--text-muted);">${ticket.due_date || '-'}</td>
-            <td>
-                <div class="tags-container" style="margin-top: 0;">
-                    ${ticket.tags && ticket.tags.length > 0
-                        ? ticket.tags.map(tag => `<span class="tag-badge">${tag}</span>`).join("")
-                        : "<span style='color: #a5adba; font-size: 0.8rem;'>-</span>"}
-                </div>
-            </td>
-        `;
+            <td><input type="checkbox" class="ticket-select-check" data-id="${ticket.id}" ${selectedTicketIds.has(ticket.id) ? "checked" : ""}></td>
+            <td class="ticket-key">TB-${ticket.id}</td>
+            <td><span class="priority-badge priority-${esc(prio)}">${PRIO_LABEL[prio] || esc(titleCase(prio))}</span> <span class="type-badge">${TYPE_LABEL[type] || esc(titleCase(type))}</span></td>
+            <td class="ticket-link">${esc(ticket.title)}</td>
+            <td><span class="status-pill status-${esc(st)}">${esc(statusLabel(st))}</span></td>
+            <td>${ticket.assignee ? esc(ticket.assignee) : '<span class="empty-note">Sin asignar</span>'}</td>
+            <td>${dueChip(ticket) || '<span class="empty-note">—</span>'}</td>
+            <td class="num">${ticket.story_points || 0}</td>`;
+        tr.addEventListener("click", (e) => { if (!e.target.closest("input")) openEditPanel(ticket.id); });
         ticketListBody.appendChild(tr);
+    });
+    document.querySelectorAll(".ticket-select-check").forEach(chk => {
+        chk.addEventListener("change", (e) => {
+            const id = parseInt(e.target.dataset.id);
+            if (e.target.checked) selectedTicketIds.add(id); else selectedTicketIds.delete(id);
+            updateBulkToolbar();
+        });
+    });
+}
+
+function updateBulkToolbar() {
+    const bar = document.getElementById("bulk-actions-bar");
+    const countSpan = document.getElementById("bulk-selected-count");
+    if (!bar || !countSpan) return;
+
+    if (selectedTicketIds.size > 0) {
+        countSpan.textContent = `${selectedTicketIds.size} seleccionados`;
+        bar.style.display = "flex";
+    } else {
+        bar.style.display = "none";
+    }
+}
+
+const btnCancelBulk = document.getElementById("btn-cancel-bulk");
+if (btnCancelBulk) {
+    btnCancelBulk.addEventListener("click", () => {
+        selectedTicketIds.clear();
+        updateBulkToolbar();
+        applyOmnibarFilter();
+    });
+}
+
+const btnApplyBulk = document.getElementById("btn-apply-bulk");
+if (btnApplyBulk) {
+    btnApplyBulk.addEventListener("click", async () => {
+        const newStatus = document.getElementById("bulk-status-select").value;
+        const newPriority = document.getElementById("bulk-priority-select").value;
+
+        if (!newStatus && !newPriority) {
+            alert("Selecciona al menos un atributo a modificar.");
+            return;
+        }
+
+        try {
+            const res = await authFetch(`${API_BASE}/tickets/bulk-update`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    ticket_ids: Array.from(selectedTicketIds),
+                    status: newStatus || null,
+                    priority: newPriority || null
+                })
+            });
+
+            if (res.ok) {
+                selectedTicketIds.clear();
+                updateBulkToolbar();
+                await fetchAndRenderTickets();
+            }
+        } catch (e) {
+            console.error("Error en acción masiva:", e);
+        }
     });
 }
 
 function renderQuickFilters(tickets) {
     const filtersBar = document.getElementById("quick-filters");
     if (!filtersBar) return;
-
-    const allTags = new Set();
-    tickets.forEach(ticket => {
-        if (ticket.tags) ticket.tags.forEach(tag => allTags.add(tag));
-    });
-
     filtersBar.innerHTML = `
-        <span class="filter-label">Filtros rápidos:</span>
-        <button class="filter-pill active" data-filter="">Todos</button>
+        <span class="filter-label">Filtros rápidos</span>
+        <button class="filter-pill active" onclick="filterByPriority('', this)">Todos</button>
+        <button class="filter-pill" onclick="filterByPriority('URGENT', this)"><span class="dot" style="background: var(--prio-urgent)"></span>Urgentes</button>
+        <button class="filter-pill" onclick="filterByPriority('HIGH', this)"><span class="dot" style="background: var(--prio-high)"></span>Altas</button>
     `;
-
-    allTags.forEach(tag => {
-        const btn = document.createElement("button");
-        btn.className = "filter-pill";
-        btn.dataset.filter = `#${tag.toLowerCase()}`;
-        btn.textContent = `#${tag}`;
-        filtersBar.appendChild(btn);
-    });
-
-    filtersBar.querySelectorAll(".filter-pill").forEach(pill => {
-        pill.addEventListener("click", (e) => {
-            filtersBar.querySelectorAll(".filter-pill").forEach(p => p.classList.remove("active"));
-            e.target.classList.add("active");
-
-            if (searchInput) {
-                searchInput.value = e.target.dataset.filter;
-                applyOmnibarFilter();
-            }
-        });
-    });
 }
 
-async function syncTicketStatus(ticketId, newStatus) {
-    await updateTicketStatus(ticketId, newStatus);
-    const ticketCard = document.querySelector(`.ticket-card[data-id="${ticketId}"]`);
-    const newColumn = document.querySelector(`.column-content[data-status="${newStatus}"]`);
-    if (ticketCard && newColumn) {
-        newColumn.appendChild(ticketCard);
-    }
-}
+window.filterByPriority = function(prio, btn) {
+    document.querySelectorAll("#quick-filters .filter-pill").forEach(p => p.classList.remove("active"));
+    if (btn) btn.classList.add("active");
+    if (searchInput) searchInput.value = prio ? "priority:" + prio.toLowerCase() : "";
+    applyOmnibarFilter();
+};
 
 async function updateTicketStatus(ticketId, status) {
     try {
-        await authFetch(`${API_BASE}/tickets/${ticketId}/status`, {
+        const res = await authFetch(`${API_BASE}/tickets/${ticketId}/status`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: status })
         });
+        return res.ok;
     } catch (error) {
         console.error("Error:", error);
+        return false;
     }
+}
+
+function toast(msg, kind = "info") {
+    const el = document.createElement("div");
+    el.className = `toast ${kind}`;
+    el.setAttribute("role", "status");
+    el.textContent = msg;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 4000);
 }
 
 let draggedTicket = null;
@@ -633,6 +464,7 @@ function setupDragAndDrop() {
     tickets.forEach(ticket => {
         ticket.addEventListener('dragstart', () => {
             draggedTicket = ticket;
+            ticket._from = ticket.parentElement; ticket._next = ticket.nextSibling;
             setTimeout(() => ticket.style.opacity = '0.5', 0);
         });
         ticket.addEventListener('dragend', () => {
@@ -642,45 +474,50 @@ function setupDragAndDrop() {
     });
 
     columns.forEach(column => {
-        column.addEventListener('dragover', (e) => e.preventDefault());
-        column.addEventListener('dragenter', (e) => {
-            e.preventDefault();
-            column.style.backgroundColor = '#e2e4e9';
-        });
-        column.addEventListener('dragleave', () => {
-            column.style.backgroundColor = '';
-        });
+        column.addEventListener('dragover', (e) => { e.preventDefault(); column.classList.add('drag-over'); });
+        column.addEventListener('dragleave', () => column.classList.remove('drag-over'));
         column.addEventListener('drop', async (e) => {
             e.preventDefault();
-            column.style.backgroundColor = '';
             if (draggedTicket) {
-                const oldColumn = draggedTicket.closest('.column-content');
-                if (oldColumn === column) return;
-
+                column.classList.remove('drag-over');
                 column.appendChild(draggedTicket);
+                updateColumnCounts();
                 const ticketId = draggedTicket.dataset.id;
                 const newStatus = column.dataset.status;
-                await updateTicketStatus(ticketId, newStatus);
+                const card = draggedTicket, from = card._from, next = card._next;
+                if (from !== column) {
+                    const ok = await updateTicketStatus(ticketId, newStatus);
+                    if (ok) {
+                        const t = rawTickets.find(x => x.id == ticketId);
+                        if (t) t.status = newStatus;
+                    } else {
+                        from.insertBefore(card, next);
+                        updateColumnCounts();
+                        toast("No se pudo mover el ticket; se ha restaurado su posición.", "error");
+                    }
+                }
             }
         });
     });
 }
 
-// --- PANEL LATERAL TICKET ---
+// PANEL LATERAL TICKET
 const sidePanel = document.getElementById("side-panel");
 const btnClosePanel = document.getElementById("close-panel");
-const btnCancel = document.getElementById("cancel-ticket");
 const formTicket = document.getElementById("ticket-form");
 const panelTitle = document.getElementById("panel-title");
 
 if (sidePanel) {
     const closePanel = () => {
-        sidePanel.classList.remove("open");
+        sidePanel.classList.remove("open", "full", "editing");
+        editingTicket = null;
         setTimeout(() => { 
             if(formTicket) {
                 formTicket.reset(); 
                 document.getElementById("ticket-id").value = "";
-                panelTitle.textContent = "Nuevo Ticket";
+                panelTitle.textContent = "Nuevo ticket";
+                document.getElementById("checklist-section").style.display = "none";
+                document.getElementById("history-section").style.display = "none";
                 document.getElementById("branch-generator-box").style.display = "none";
                 document.getElementById("manual-commit-form").style.display = "none";
             }
@@ -689,15 +526,17 @@ if (sidePanel) {
 
     if (headerNewTicketBtn) {
         headerNewTicketBtn.addEventListener("click", () => {
-            panelTitle.textContent = "Nuevo Ticket";
-            document.getElementById("branch-generator-box").style.display = "none";
+            panelTitle.textContent = "Nuevo ticket";
             sidePanel.classList.add("open");
-            setTimeout(() => document.getElementById("ticket-title").focus(), 300);
         });
     }
 
     if (btnClosePanel) btnClosePanel.addEventListener("click", closePanel);
-    if (btnCancel) btnCancel.addEventListener("click", closePanel);
+    const btnCancelTicket = document.getElementById("cancel-ticket");
+    if (btnCancelTicket) btnCancelTicket.addEventListener("click", closePanel);
+    const overlay = document.getElementById("panel-overlay");
+    if (overlay) overlay.addEventListener("click", closePanel);
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && sidePanel.classList.contains("open")) closePanel(); });
 
     if (formTicket) {
         formTicket.addEventListener("submit", async (e) => {
@@ -705,31 +544,26 @@ if (sidePanel) {
             
             const rawTags = document.getElementById("ticket-tags").value;
             const tagsArray = rawTags ? rawTags.split(",").map(t => t.trim()).filter(t => t) : [];
-            const timeVal = document.getElementById("ticket-time").value;
+            const spVal = document.getElementById("ticket-story-points").value;
             
             const ticketData = {
                 title: document.getElementById("ticket-title").value,
                 description: document.getElementById("ticket-desc").value,
+                ticket_type: document.getElementById("ticket-type").value,
+                priority: document.getElementById("ticket-priority").value,
                 epic: document.getElementById("ticket-epic").value || null,
                 assignee: document.getElementById("ticket-assignee").value || null,
                 due_date: document.getElementById("ticket-due").value || null,
-                time_logged: timeVal ? parseInt(timeVal) : 0,
-                project_id: currentProjectId,
+                story_points: spVal ? parseInt(spVal) : 0,
+                project_id: editingTicket ? (editingTicket.project_id ?? currentProjectId) : currentProjectId,
                 tags: tagsArray,
-                status: "todo"
+                status: document.getElementById("ticket-status").value || (editingTicket && editingTicket.status) || "todo"
             };
 
             const ticketId = document.getElementById("ticket-id").value;
             const isEditing = !!ticketId;
             const method = isEditing ? 'PUT' : 'POST';
             const url = isEditing ? `${API_BASE}/tickets/${ticketId}` : `${API_BASE}/tickets`;
-
-            if (isEditing) {
-                const existingCard = document.querySelector(`.ticket-card[data-id="${ticketId}"]`);
-                if (existingCard) {
-                    ticketData.status = existingCard.closest('.column-content').dataset.status;
-                }
-            }
 
             try {
                 const response = await authFetch(url, {
@@ -739,11 +573,11 @@ if (sidePanel) {
                 });
 
                 if (response.ok) {
-                    fetchAndRenderTickets();
+                    await fetchAndRenderTickets();
                     closePanel();
                 }
             } catch (error) {
-                console.error("Error al guardar:", error);
+                console.error("Error guardando ticket:", error);
             }
         });
     }
@@ -757,46 +591,138 @@ async function openEditPanel(ticketId) {
         const ticket = allTickets.find(t => t.id == ticketId);
         
         if (ticket) {
+            editingTicket = ticket;
+            sidePanel.classList.add("editing");
+            fillStatusOptions(ticket.status);
+            renderWorklogs(ticket.id);
             document.getElementById("ticket-id").value = ticket.id;
             document.getElementById("ticket-title").value = ticket.title || "";
             document.getElementById("ticket-desc").value = ticket.description || "";
+            setSelectValue("ticket-type", ticket.ticket_type, "TASK");
+            setSelectValue("ticket-priority", ticket.priority, "MEDIUM");
             document.getElementById("ticket-epic").value = ticket.epic || "";
             document.getElementById("ticket-assignee").value = ticket.assignee || "";
-            document.getElementById("ticket-due").value = ticket.due_date || "";
-            document.getElementById("ticket-time").value = ticket.time_logged || 0;
+            document.getElementById("ticket-due").value = String(ticket.due_date || "").slice(0, 10);
+            document.getElementById("ticket-story-points").value = ticket.story_points || 0;
             document.getElementById("ticket-tags").value = ticket.tags ? ticket.tags.join(", ") : "";
             
             panelTitle.textContent = `Editar TB-${ticket.id}`;
-            
-            // Generador de rama
+
+            // Generator Branch
             const branchBox = document.getElementById("branch-generator-box");
             const branchText = document.getElementById("branch-name-text");
             const slug = (ticket.title || "task").toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-            branchText.textContent = `feature/TB-${ticket.id}-${slug}`;
+            branchText.textContent = `${norm(ticket.ticket_type) === "bug" ? "fix" : "feature"}/TB-${ticket.id}-${slug}`;
             branchBox.style.display = "block";
 
             sidePanel.classList.add("open");
 
+            await loadChecklist(ticket.id);
+            await loadTicketHistory(ticket.id);
             await loadTicketGithubActivity(ticket.id);
             await loadTicketComments(ticket.id);
         }
     } catch (error) {
-        console.error("Error cargando el ticket:", error);
+        console.error("Error cargando ticket:", error);
     }
 }
 
-// Copiar nombre de rama
+// COPIAR NOMBRE DE RAMA
 const btnCopyBranch = document.getElementById("btn-copy-branch");
 if (btnCopyBranch) {
     btnCopyBranch.addEventListener("click", () => {
         const branchText = document.getElementById("branch-name-text").textContent;
         navigator.clipboard.writeText(branchText);
-        btnCopyBranch.textContent = "Copiaste! ✅";
+        btnCopyBranch.textContent = "Copiado";
         setTimeout(() => btnCopyBranch.textContent = "Copiar", 2000);
     });
 }
 
-// Vinculación manual commit
+// CHECKLIST
+async function loadChecklist(ticketId) {
+    const sec = document.getElementById("checklist-section");
+    const list = document.getElementById("checklist-items-list");
+    if (!sec || !list) return;
+
+    sec.style.display = "block";
+    try {
+        const res = await authFetch(`${API_BASE}/tickets/${ticketId}/checklist`);
+        if (!res.ok) return;
+        const items = await res.json();
+
+        list.innerHTML = items.map(item => `
+            <div class="checklist-item ${item.is_completed ? 'completed' : ''}">
+                <input type="checkbox" ${item.is_completed ? 'checked' : ''} onclick="toggleCheckItem(${item.id}, ${!item.is_completed}, ${ticketId})">
+                <span>${esc(item.content)}</span>
+            </div>
+        `).join("");
+    } catch (e) {
+        console.error("Error cargando checklist:", e);
+    }
+}
+
+window.toggleCheckItem = async function(itemId, isCompleted, ticketId) {
+    try {
+        await authFetch(`${API_BASE}/checklist/${itemId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ is_completed: isCompleted })
+        });
+        await loadChecklist(ticketId);
+    } catch (e) {
+        console.error("Error actualizando checklist:", e);
+    }
+};
+
+const btnAddChecklist = document.getElementById("btn-add-checklist");
+if (btnAddChecklist) {
+    btnAddChecklist.addEventListener("click", async () => {
+        const ticketId = document.getElementById("ticket-id").value;
+        const input = document.getElementById("new-checklist-item");
+        if (!ticketId || !input.value.trim()) return;
+
+        try {
+            await authFetch(`${API_BASE}/tickets/${ticketId}/checklist`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ content: input.value.trim() })
+            });
+            input.value = "";
+            await loadChecklist(ticketId);
+        } catch (e) {
+            console.error("Error añadiendo item:", e);
+        }
+    });
+}
+
+// HISTORIAL
+async function loadTicketHistory(ticketId) {
+    const sec = document.getElementById("history-section");
+    const list = document.getElementById("ticket-history-list");
+    if (!sec || !list) return;
+
+    sec.style.display = "block";
+    try {
+        const res = await authFetch(`${API_BASE}/tickets/${ticketId}/history`);
+        if (!res.ok) return;
+        const history = await res.json();
+
+        if (history.length === 0) {
+            list.innerHTML = '<p class="empty-note">Sin cambios registrados.</p>';
+            return;
+        }
+
+        list.innerHTML = history.map(h => `
+            <div class="history-item">
+                <strong>@${h.author_username}</strong> cambió <code>${h.field_changed}</code> de '${h.old_value || '-'}' a '${h.new_value || '-'}'
+            </div>
+        `).join("");
+    } catch (e) {
+        console.error("Error cargando historial:", e);
+    }
+}
+
+// GITHUB ACTIVIDAD & COMENTARIOS CON ARCHIVOS
 const btnToggleManual = document.getElementById("btn-toggle-manual-commit");
 const manualForm = document.getElementById("manual-commit-form");
 if (btnToggleManual && manualForm) {
@@ -838,171 +764,9 @@ if (btnSaveManualCommit) {
     });
 }
 
-// --- FASE 8: LÓGICA DE GITHUB Y FEEDS ---
-const githubModal = document.getElementById("github-modal");
-const btnProjectRepos = document.getElementById("btn-project-repos");
-const btnSyncGithub = document.getElementById("btn-sync-github");
-const closeGithubModal = document.getElementById("close-github-modal");
-const linkRepoForm = document.getElementById("link-repo-form");
-
-if (btnProjectRepos) {
-    btnProjectRepos.addEventListener("click", async () => {
-        if (!currentProjectId) return;
-        await renderProjectRepos();
-        githubModal.style.display = "flex";
-    });
-}
-
-if (closeGithubModal) closeGithubModal.addEventListener("click", () => githubModal.style.display = "none");
-
-async function renderProjectRepos() {
-    const list = document.getElementById("project-repos-list");
-    if (!list || !currentProjectId) return;
-
-    try {
-        const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/repositories`);
-        if (!res.ok) return;
-        const repos = await res.json();
-
-        if (repos.length === 0) {
-            list.innerHTML = "<p style='font-size: 0.85rem; color: var(--text-muted);'>No hay repositorios vinculados a este proyecto.</p>";
-            return;
-        }
-
-        list.innerHTML = repos.map(r => `
-            <div class="archived-item">
-                <div>
-                    <strong>${r.owner}/${r.repo_name}</strong>
-                    <span class="sync-status-badge ${r.last_sync_status || 'never'}">${r.last_sync_status || 'sin sincronizar'}</span>
-                    <div style="font-size: 0.7rem; color: var(--text-muted); margin-top: 2px;">
-                        ${r.last_synced_at ? 'Última sync: ' + new Date(r.last_synced_at).toLocaleString() : 'Nunca sincronizado'}
-                    </div>
-                </div>
-                <button class="btn" style="padding: 2px 8px; font-size: 0.75rem; color: #ff5630; border-color: #ff5630;" onclick="unlinkRepo(${r.id})">Desvincular</button>
-            </div>
-        `).join("");
-    } catch (e) {
-        console.error("Error cargando repositorios:", e);
-    }
-}
-
-if (linkRepoForm) {
-    linkRepoForm.addEventListener("submit", async (e) => {
-        e.preventDefault();
-        const owner = document.getElementById("repo-owner").value.trim();
-        const repo_name = document.getElementById("repo-name").value.trim();
-        const access_token = document.getElementById("repo-token").value.trim();
-        const auto_move_tickets = document.getElementById("repo-auto-move").checked;
-        const webhook_secret = document.getElementById("repo-webhook-secret").value.trim();
-
-        try {
-            const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/repositories`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    owner, repo_name,
-                    access_token: access_token || null,
-                    auto_move_tickets,
-                    webhook_secret: webhook_secret || null
-                })
-            });
-
-            if (res.ok) {
-                linkRepoForm.reset();
-                await renderProjectRepos();
-            } else {
-                const data = await res.json();
-                alert(data.detail || "Error al vincular el repositorio.");
-            }
-        } catch (err) {
-            console.error("Error vinculando repo:", err);
-        }
-    });
-}
-
-window.unlinkRepo = async function(repoId) {
-    if (!confirm("¿Desvincular este repositorio del proyecto?")) return;
-    try {
-        const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/repositories/${repoId}`, { method: "DELETE" });
-        if (res.ok) await renderProjectRepos();
-    } catch (err) {
-        console.error("Error desvinculando repo:", err);
-    }
-};
-
-if (btnSyncGithub) {
-    btnSyncGithub.addEventListener("click", async () => {
-        if (!currentProjectId) return;
-        btnSyncGithub.textContent = "⏳ Sincronizando...";
-        btnSyncGithub.disabled = true;
-
-        try {
-            const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/github/sync`, { method: "POST" });
-            if (res.ok) {
-                const data = await res.json();
-                alert(`✅ Sincronización completada:\n• ${data.synced_commits} nuevos commits\n• ${data.synced_prs} nuevos PRs`);
-                await loadProjectGithubFeed();
-            } else {
-                alert("Error durante la sincronización.");
-            }
-        } catch (err) {
-            console.error("Error sincronizando GitHub:", err);
-        } finally {
-            btnSyncGithub.textContent = "🔄 Sincronizar GitHub";
-            btnSyncGithub.disabled = false;
-        }
-    });
-}
-
-async function loadProjectGithubFeed() {
-    const feed = document.getElementById("project-github-feed");
-    if (!feed || !currentProjectId) return;
-
-    try {
-        const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/github/activity`);
-        if (!res.ok) return;
-        const data = await res.json();
-
-        if (data.commits.length === 0 && data.pull_requests.length === 0) {
-            feed.innerHTML = "<p style='color: var(--text-muted); font-size: 0.85rem;'>No hay actividad reciente de GitHub en este proyecto.</p>";
-            return;
-        }
-
-        let html = "";
-        data.pull_requests.forEach(pr => {
-            html += `
-                <div class="github-item">
-                    <a href="${pr.url}" target="_blank" class="github-item-title">
-                        <span>PR #${pr.pr_number} - ${pr.title} (TB-${pr.ticket_id})</span>
-                        <span class="pr-badge ${pr.state}">${pr.state}</span>
-                    </a>
-                    <div class="github-meta">por @${pr.author}</div>
-                </div>
-            `;
-        });
-
-        data.commits.forEach(c => {
-            html += `
-                <div class="github-item">
-                    <a href="${c.url}" target="_blank" class="github-item-title">
-                        <span><code>${c.commit_sha.substring(0, 7)}</code> ${c.message} (TB-${c.ticket_id})</span>
-                    </a>
-                    <div class="github-meta">por ${c.author}</div>
-                </div>
-            `;
-        });
-
-        feed.innerHTML = html;
-    } catch (e) {
-        console.error("Error cargando feed de actividad:", e);
-    }
-}
-
 async function loadTicketGithubActivity(ticketId) {
     const container = document.getElementById("ticket-github-activity");
     if (!container) return;
-
-    container.innerHTML = "<p style='margin:0;'>Cargando actividad de GitHub...</p>";
 
     try {
         const res = await authFetch(`${API_BASE}/tickets/${ticketId}/github`);
@@ -1010,45 +774,20 @@ async function loadTicketGithubActivity(ticketId) {
         const data = await res.json();
 
         if (data.commits.length === 0 && data.pull_requests.length === 0) {
-            container.innerHTML = "<p style='margin:0;'>Sin commits ni Pull Requests vinculados a este ticket.</p>";
+            container.innerHTML = '<p class="empty-note">Sin commits ni PRs vinculados.</p>';
             return;
         }
 
         let html = "";
-
-        if (data.pull_requests.length > 0) {
-            html += "<strong style='display:block; margin-bottom: 4px; color: var(--text-main);'>Pull Requests:</strong>";
-            data.pull_requests.forEach(pr => {
-                html += `
-                    <div class="github-item">
-                        <a href="${pr.url}" target="_blank" class="github-item-title">
-                            <span>#${pr.pr_number} ${pr.title}</span>
-                            <span class="pr-badge ${pr.state}">${pr.state}</span>
-                        </a>
-                        <div class="github-meta">por @${pr.author}</div>
-                    </div>
-                `;
-            });
-        }
-
-        if (data.commits.length > 0) {
-            html += "<strong style='display:block; margin-top: 8px; margin-bottom: 4px; color: var(--text-main);'>Commits:</strong>";
-            data.commits.forEach(c => {
-                html += `
-                    <div class="github-item">
-                        <a href="${c.url}" target="_blank" class="github-item-title">
-                            <span><code>${c.commit_sha.substring(0, 7)}</code> ${c.message}</span>
-                        </a>
-                        <div class="github-meta">por ${c.author}</div>
-                    </div>
-                `;
-            });
-        }
-
+        data.pull_requests.forEach(pr => {
+            html += `<div class="github-item"><a href="${pr.url}" target="_blank">#${pr.pr_number} ${pr.title} [${pr.state}]</a></div>`;
+        });
+        data.commits.forEach(c => {
+            html += `<div class="github-item"><a href="${c.url}" target="_blank"><code>${c.commit_sha.substring(0, 7)}</code> ${c.message}</a></div>`;
+        });
         container.innerHTML = html;
     } catch (e) {
         console.error("Error cargando actividad de GitHub:", e);
-        container.innerHTML = "<p style='margin:0; color: #ff5630;'>Error cargando datos de GitHub.</p>";
     }
 }
 
@@ -1062,18 +801,18 @@ async function loadTicketComments(ticketId) {
         const comments = await res.json();
 
         if (comments.length === 0) {
-            list.innerHTML = "<p style='font-size: 0.8rem; color: var(--text-muted);'>No hay comentarios todavía.</p>";
+            list.innerHTML = '<p class="empty-note">Aún no hay comentarios.</p>';
             return;
         }
 
         list.innerHTML = comments.map(c => `
-            <div class="github-item" style="margin-bottom: 8px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                    <strong>${c.author_avatar} @${c.author_username}</strong>
-                    <span style="font-size: 0.7rem; color: var(--text-muted);">${new Date(c.created_at).toLocaleString()}</span>
+            <div class="comment">
+                <span class="avatar-badge">${esc(c.author_avatar || "")}</span>
+                <div class="comment-main">
+                    <div class="comment-head"><strong>@${esc(c.author_username)}</strong><span>${new Date(c.created_at).toLocaleString("es-ES", { dateStyle: "medium", timeStyle: "short" })}</span></div>
+                    <div class="comment-body">${esc(c.content)}</div>
+                    ${c.image_url ? `<a href="${esc(c.image_url)}" target="_blank" rel="noopener"><img class="comment-img" src="${esc(c.image_url)}" alt=""></a>` : ""}
                 </div>
-                <div style="font-size: 0.85rem; color: var(--text-main); white-space: pre-wrap;">${c.content}</div>
-                ${c.image_url ? `<div style="margin-top: 6px;"><a href="${c.image_url}" target="_blank"><img src="${c.image_url}" style="max-width: 100%; max-height: 180px; border-radius: 6px; border: 1px solid var(--sidebar-border);" /></a></div>` : ''}
             </div>
         `).join("");
         
@@ -1121,74 +860,121 @@ if (btnSendComment) {
     });
 }
 
-// OTROS NAVEGADORES Y EVENTOS
-const btnGoBoard = document.getElementById("btn-go-board");
-if (btnGoBoard) {
-    btnGoBoard.addEventListener("click", () => {
-        document.getElementById("project-home").style.display = "none";
-        document.getElementById("quick-filters").style.display = "flex";
-        
-        if (isListView) {
-            document.getElementById("list-container").style.display = "block";
-        } else {
-            document.getElementById("board-container").style.display = "flex";
-        }
-        fetchAndRenderTickets();
-    });
-}
+// GITHUB MODAL & SYNC
+const githubModal = document.getElementById("github-modal");
+const btnProjectRepos = document.getElementById("btn-project-repos");
+const btnSyncGithub = document.getElementById("btn-sync-github");
+const closeGithubModal = document.getElementById("close-github-modal");
+const linkRepoForm = document.getElementById("link-repo-form");
 
-const btnArchiveProject = document.getElementById("btn-archive-project");
-if (btnArchiveProject) {
-    btnArchiveProject.addEventListener("click", async () => {
+if (btnProjectRepos) {
+    btnProjectRepos.addEventListener("click", async () => {
         if (!currentProjectId) return;
-
-        const confirmArchive = confirm("¿Seguro que quieres archivar este proyecto?");
-        if (confirmArchive) {
-            try {
-                const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/archive`, { method: 'PUT' });
-                if (res.ok) {
-                    currentProjectId = null;
-                    await loadProjects();
-                    document.getElementById("nav-global-all").click();
-                }
-            } catch (err) {
-                console.error("Error archivando el proyecto:", err);
-            }
-        }
+        await renderProjectRepos();
+        githubModal.style.display = "flex";
     });
 }
+if (closeGithubModal) closeGithubModal.addEventListener("click", () => githubModal.style.display = "none");
 
-const projectModal = document.getElementById("project-modal");
-const btnOpenCreateProject = document.getElementById("btn-open-create-project");
-const btnCloseProjectModal = document.getElementById("close-project-modal");
-const projectForm = document.getElementById("project-form");
+async function renderProjectRepos() {
+    const list = document.getElementById("project-repos-list");
+    if (!list || !currentProjectId) return;
 
-if (btnOpenCreateProject) btnOpenCreateProject.addEventListener("click", () => projectModal.style.display = "flex");
-if (btnCloseProjectModal) btnCloseProjectModal.addEventListener("click", () => projectModal.style.display = "none");
+    try {
+        const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/repositories`);
+        if (!res.ok) return;
+        const repos = await res.json();
 
-if (projectForm) {
-    projectForm.addEventListener("submit", async (e) => {
+        list.innerHTML = repos.map(r => `
+            <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+                <span><strong>${r.owner}/${r.repo_name}</strong></span>
+                <button class="btn" style="padding:2px 6px; font-size:0.7rem; color:#ef4444;" onclick="unlinkRepo(${r.id})">Quitar</button>
+            </div>
+        `).join("");
+    } catch (e) {
+        console.error("Error cargando repositorios:", e);
+    }
+}
+
+if (linkRepoForm) {
+    linkRepoForm.addEventListener("submit", async (e) => {
         e.preventDefault();
-        const name = document.getElementById("new-project-name").value;
-        const color = document.getElementById("new-project-color").value;
+        const owner = document.getElementById("repo-owner").value.trim();
+        const repo_name = document.getElementById("repo-name").value.trim();
+        const access_token = document.getElementById("repo-token").value.trim();
+        const auto_move_tickets = document.getElementById("repo-auto-move").checked;
+        const webhook_secret = document.getElementById("repo-webhook-secret").value.trim();
 
         try {
-            const res = await authFetch(`${API_BASE}/projects`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name, color })
+            const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/repositories`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    owner, repo_name,
+                    access_token: access_token || null,
+                    auto_move_tickets,
+                    webhook_secret: webhook_secret || null
+                })
             });
+
             if (res.ok) {
-                projectModal.style.display = "none";
-                projectForm.reset();
-                await loadProjects();
+                linkRepoForm.reset();
+                await renderProjectRepos();
             }
         } catch (err) {
-            console.error("Error creando proyecto", err);
+            console.error("Error vinculando repo:", err);
         }
     });
 }
 
+window.unlinkRepo = async function(repoId) {
+    if (!confirm("¿Desvincular repositorio?")) return;
+    try {
+        const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/repositories/${repoId}`, { method: "DELETE" });
+        if (res.ok) await renderProjectRepos();
+    } catch (err) {
+        console.error("Error desvinculando repo:", err);
+    }
+};
+
+if (btnSyncGithub) {
+    btnSyncGithub.addEventListener("click", async () => {
+        if (!currentProjectId) return;
+        btnSyncGithub.textContent = "Sincronizando…";
+        try {
+            const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/github/sync`, { method: "POST" });
+            if (res.ok) {
+                const data = await res.json();
+                alert(`✅ ${data.synced_commits} commits y ${data.synced_prs} PRs sincronizados.`);
+                await loadProjectGithubFeed();
+            }
+        } catch (err) {
+            console.error("Error sincronizando:", err);
+        } finally {
+            btnSyncGithub.textContent = "Sincronizar GitHub";
+        }
+    });
+}
+
+async function loadProjectGithubFeed() {
+    const feed = document.getElementById("project-github-feed");
+    if (!feed || !currentProjectId) return;
+
+    try {
+        const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/github/activity`);
+        if (!res.ok) return;
+        const data = await res.json();
+
+        let html = "";
+        data.pull_requests.forEach(pr => { html += `<div>PR #${pr.pr_number} - ${pr.title} (${pr.state})</div>`; });
+        data.commits.forEach(c => { html += `<div><code>${c.commit_sha.substring(0,7)}</code> ${c.message}</div>`; });
+        feed.innerHTML = html || "<p style='color:var(--text-muted); font-size:0.85rem;'>Sin actividad reciente.</p>";
+    } catch (e) {
+        console.error("Error en feed:", e);
+    }
+}
+
+// ARCHIVADOS Y ELIMINACION DE PROYECTOS
 const archivedModal = document.getElementById("archived-projects-modal");
 const navArchivedProjects = document.getElementById("nav-archived-projects");
 const closeArchivedModal = document.getElementById("close-archived-modal");
@@ -1200,10 +986,7 @@ if (navArchivedProjects) {
         archivedModal.style.display = "flex";
     });
 }
-
-if (closeArchivedModal) {
-    closeArchivedModal.addEventListener("click", () => archivedModal.style.display = "none");
-}
+if (closeArchivedModal) closeArchivedModal.addEventListener("click", () => archivedModal.style.display = "none");
 
 async function renderArchivedProjectsList() {
     const listContainer = document.getElementById("archived-project-list");
@@ -1220,24 +1003,17 @@ async function renderArchivedProjectsList() {
             return;
         }
 
-        listContainer.innerHTML = "";
-        archivedProjects.forEach(p => {
-            const div = document.createElement("div");
-            div.className = "archived-item";
-            div.innerHTML = `
-                <div style="display: flex; align-align: center; gap: 0.5rem;">
-                    <span class="project-color" style="background-color: ${p.color};"></span>
-                    <span style="font-weight: 600;">${p.name}</span>
+        listContainer.innerHTML = archivedProjects.map(p => `
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <span>${p.name}</span>
+                <div>
+                    <button class="btn" style="padding:2px 8px; font-size:0.75rem;" onclick="unarchiveProject(${p.id})">Restaurar</button>
+                    <button class="btn" style="padding:2px 8px; font-size:0.75rem; color:#ef4444;" onclick="deleteProjectPermanently(${p.id})">Eliminar</button>
                 </div>
-                <div style="display: flex; gap: 0.5rem;">
-                    <button class="btn" style="padding: 4px 10px; font-size: 0.8rem;" onclick="unarchiveProject(${p.id})">Restaurar</button>
-                    <button class="btn" style="padding: 4px 10px; font-size: 0.8rem; color: #ff5630; border-color: #ff5630;" onclick="deleteProjectPermanently(${p.id})">Eliminar</button>
-                </div>
-            `;
-            listContainer.appendChild(div);
-        });
+            </div>
+        `).join("");
     } catch (err) {
-        console.error("Error cargando proyectos archivados:", err);
+        console.error("Error cargando archivados:", err);
     }
 }
 
@@ -1249,12 +1025,12 @@ window.unarchiveProject = async function(projectId) {
             await renderArchivedProjectsList();
         }
     } catch (err) {
-        console.error("Error al restaurar proyecto:", err);
+        console.error("Error restaurando:", err);
     }
 };
 
 window.deleteProjectPermanently = async function(projectId) {
-    if (confirm("⚠️ ¿Seguro que quieres ELIMINAR permanentemente este proyecto y TODOS sus tickets? Esta acción no se puede deshacer.")) {
+    if (confirm("⚠️ ¿Eliminar permanentemente este proyecto y sus tickets?")) {
         try {
             const res = await authFetch(`${API_BASE}/projects/${projectId}`, { method: 'DELETE' });
             if (res.ok) {
@@ -1262,65 +1038,29 @@ window.deleteProjectPermanently = async function(projectId) {
                 await renderArchivedProjectsList();
             }
         } catch (err) {
-            console.error("Error al eliminar proyecto:", err);
+            console.error("Error eliminando:", err);
         }
     }
 };
 
-document.addEventListener("keydown", (e) => {
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
-        if (e.key === 'Escape' && sidePanel && sidePanel.classList.contains("open")) {
-            e.target.blur();
-            if (btnClosePanel) btnClosePanel.click();
-        }
-        return;
-    }
-
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        if (searchInput) searchInput.focus();
-    }
-
-    if (e.key.toLowerCase() === 'c' && currentProjectId) {
-        e.preventDefault();
-        if (headerNewTicketBtn) headerNewTicketBtn.click();
-    }
-
-    if (e.key.toLowerCase() === 'k' && !(e.ctrlKey || e.metaKey) && btnToggleView) {
-        e.preventDefault();
-        btnToggleView.click();
-    }
-
-    if (e.key === 'Escape') {
-        if (sidePanel && sidePanel.classList.contains("open") && btnClosePanel) btnClosePanel.click();
-        if (projectModal) projectModal.style.display = "none";
-        if (archivedModal) archivedModal.style.display = "none";
-    }
-});
-
-const toggleSidebarBtn = document.getElementById('toggle-sidebar');
-const sidebar = document.getElementById('sidebar');
-
-if (toggleSidebarBtn && sidebar) {
-    toggleSidebarBtn.addEventListener('click', () => {
-        sidebar.classList.toggle('collapsed');
-    });
-}
-
-const themeToggleBtn = document.getElementById("theme-toggle");
-if (themeToggleBtn) {
-    themeToggleBtn.addEventListener("click", () => {
-        const currentTheme = document.documentElement.getAttribute("data-theme");
-        if (currentTheme === "dark") {
-            document.documentElement.removeAttribute("data-theme");
-            themeToggleBtn.textContent = "🌙";
-        } else {
-            document.documentElement.setAttribute("data-theme", "dark");
-            themeToggleBtn.textContent = "☀️";
+const btnArchiveProject = document.getElementById("btn-archive-project");
+if (btnArchiveProject) {
+    btnArchiveProject.addEventListener("click", async () => {
+        if (!currentProjectId || !confirm("¿Archivar este proyecto?")) return;
+        try {
+            const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/archive`, { method: 'PUT' });
+            if (res.ok) {
+                currentProjectId = null;
+                await loadProjects();
+                document.getElementById("nav-global-all").click();
+            }
+        } catch (err) {
+            console.error("Error archivando:", err);
         }
     });
 }
 
+// GESTION DE USUARIOS GLOBALES Y MIEMBROS DE PROYECTO
 const navManageUsers = document.getElementById("nav-manage-users");
 const usersModal = document.getElementById("users-modal");
 const closeUsersModal = document.getElementById("close-users-modal");
@@ -1357,12 +1097,12 @@ async function renderGlobalUsers() {
         if (!res.ok) return;
         const users = await res.json();
         list.innerHTML = users.map(u => `
-            <div class="archived-item">
-                <span><strong>${u.username}</strong> (${u.email}) ${u.is_superuser ? '<span class="tag-badge">Admin</span>' : ''}</span>
+            <div style="margin-bottom:6px;">
+                <strong>${u.username}</strong> (${u.email}) ${u.is_superuser ? '⚡ Admin' : ''}
             </div>
         `).join("");
     } catch (e) {
-        console.error("Error cargando usuarios:", e);
+        console.error("Error usuarios:", e);
     }
 }
 
@@ -1382,9 +1122,6 @@ if (createUserForm) {
             if (res.ok) {
                 createUserForm.reset();
                 await renderGlobalUsers();
-            } else {
-                const data = await res.json();
-                alert(data.detail || "Error al crear el usuario.");
             }
         } catch (err) {
             console.error("Error creando usuario:", err);
@@ -1413,7 +1150,7 @@ async function loadUsersDropdown() {
                 users.map(u => `<option value="${u.id}">${u.username} (${u.email})</option>`).join("");
         }
     } catch (e) {
-        select.innerHTML = '<option value="">Escribe ID de Usuario...</option>';
+        select.innerHTML = '<option value="">Cargando usuarios...</option>';
     }
 }
 
@@ -1427,15 +1164,13 @@ async function renderProjectMembers() {
         const members = await res.json();
 
         list.innerHTML = members.map(m => `
-            <div class="archived-item">
-                <div>
-                    <strong>${m.username}</strong> <span style="font-size: 0.8rem; color: var(--text-muted);">(${m.role})</span>
-                </div>
-                <button class="btn" style="padding: 2px 8px; font-size: 0.75rem; color: #ff5630; border-color: #ff5630;" onclick="removeMember(${m.user_id})">Quitar</button>
+            <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+                <span><strong>${m.username}</strong> (${m.role})</span>
+                <button class="btn" style="padding:2px 6px; font-size:0.7rem; color:#ef4444;" onclick="removeMember(${m.user_id})">Quitar</button>
             </div>
         `).join("");
     } catch (e) {
-        console.error("Error cargando miembros:", e);
+        console.error("Error miembros:", e);
     }
 }
 
@@ -1455,14 +1190,10 @@ if (addMemberForm) {
             const token = localStorage.getItem("pyckets_token");
             const res = await fetch(`${API_BASE}/projects/${currentProjectId}/members`, {
                 method: "POST",
-                headers: {
-                    ...(token ? { "Authorization": `Bearer ${token}` } : {})
-                },
+                headers: { ...(token ? { "Authorization": `Bearer ${token}` } : {}) },
                 body: formData
             });
-            if (res.ok) {
-                await renderProjectMembers();
-            }
+            if (res.ok) await renderProjectMembers();
         } catch (err) {
             console.error("Error añadiendo miembro:", err);
         }
@@ -1470,17 +1201,16 @@ if (addMemberForm) {
 }
 
 window.removeMember = async function(userId) {
-    if (!currentProjectId || !confirm("¿Revocar acceso a este usuario en el proyecto?")) return;
+    if (!currentProjectId || !confirm("¿Quitar acceso a este miembro?")) return;
     try {
         const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/members/${userId}`, { method: "DELETE" });
-        if (res.ok) {
-            await renderProjectMembers();
-        }
+        if (res.ok) await renderProjectMembers();
     } catch (err) {
-        console.error("Error eliminando miembro:", err);
+        console.error("Error quitando miembro:", err);
     }
 };
 
+// PERFIL DE USUARIO
 const profileModal = document.getElementById("profile-modal");
 const btnOpenProfile = document.getElementById("btn-open-profile");
 const closeProfileModal = document.getElementById("close-profile-modal");
@@ -1496,16 +1226,13 @@ function updateProfileUI(user) {
     const handle = document.getElementById("user-handle-text");
     if (badge) badge.textContent = user.avatar || "🚀";
     if (handle) handle.textContent = `@${user.username}`;
+    const sa = document.getElementById("side-avatar"), su = document.getElementById("side-user");
+    if (sa) sa.textContent = user.avatar || "🚀";
+    if (su) su.textContent = user.first_name ? `${user.first_name} ${user.last_name || ""}`.trim() : `@${user.username}`;
 
     checkAdminUI();
 
-    if (user.theme_preference === "dark") {
-        document.documentElement.setAttribute("data-theme", "dark");
-        if (themeToggleBtn) themeToggleBtn.textContent = "☀️";
-    } else {
-        document.documentElement.removeAttribute("data-theme");
-        if (themeToggleBtn) themeToggleBtn.textContent = "🌙";
-    }
+    document.documentElement.setAttribute("data-theme", user.theme_preference === "light" ? "light" : "dark");
 }
 
 if (btnOpenProfile) {
@@ -1519,48 +1246,34 @@ if (btnOpenProfile) {
         document.getElementById("profile-theme").value = currentUser.theme_preference || "dark";
         
         selectedAvatar = currentUser.avatar || "🚀";
-        highlightSelectedAvatar(selectedAvatar);
-        
         profileModal.style.display = "flex";
     });
 }
-
-if (closeProfileModal) {
-    closeProfileModal.addEventListener("click", () => profileModal.style.display = "none");
-}
+if (closeProfileModal) closeProfileModal.addEventListener("click", () => profileModal.style.display = "none");
 
 const avatarPicker = document.getElementById("avatar-picker");
 if (avatarPicker) {
     avatarPicker.querySelectorAll(".avatar-option").forEach(opt => {
         opt.addEventListener("click", () => {
             selectedAvatar = opt.dataset.avatar;
-            highlightSelectedAvatar(selectedAvatar);
+            avatarPicker.querySelectorAll(".avatar-option").forEach(o => o.style.border = "none");
+            opt.style.border = "2px solid var(--primary)";
         });
-    });
-}
-
-function highlightSelectedAvatar(avatarEmoji) {
-    document.querySelectorAll(".avatar-option").forEach(opt => {
-        opt.classList.toggle("selected", opt.dataset.avatar === avatarEmoji);
     });
 }
 
 if (profileForm) {
     profileForm.addEventListener("submit", async (e) => {
         e.preventDefault();
-        const firstName = document.getElementById("profile-firstname").value;
-        const lastName = document.getElementById("profile-lastname").value;
-        const theme = document.getElementById("profile-theme").value;
-
         try {
             const res = await authFetch(`${API_BASE}/auth/me`, {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    first_name: firstName,
-                    last_name: lastName,
+                    first_name: document.getElementById("profile-firstname").value,
+                    last_name: document.getElementById("profile-lastname").value,
                     avatar: selectedAvatar,
-                    theme_preference: theme
+                    theme_preference: document.getElementById("profile-theme").value
                 })
             });
 
@@ -1578,25 +1291,19 @@ if (profileForm) {
 if (passwordForm) {
     passwordForm.addEventListener("submit", async (e) => {
         e.preventDefault();
-        const currentPassword = document.getElementById("pwd-current").value;
-        const newPassword = document.getElementById("pwd-new").value;
-
         try {
             const res = await authFetch(`${API_BASE}/auth/me/password`, {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    current_password: currentPassword,
-                    new_password: newPassword
+                    current_password: document.getElementById("pwd-current").value,
+                    new_password: document.getElementById("pwd-new").value
                 })
             });
 
             if (res.ok) {
                 alert("Contraseña actualizada con éxito");
                 passwordForm.reset();
-            } else {
-                const data = await res.json();
-                alert(data.detail || "Error al cambiar la contraseña");
             }
         } catch (err) {
             console.error("Error cambiando contraseña:", err);
@@ -1604,4 +1311,241 @@ if (passwordForm) {
     });
 }
 
-document.addEventListener("DOMContentLoaded", initBoard);
+// COMMAND PALETTE (CTRL + K)
+const commandPaletteModal = document.getElementById("command-palette-modal");
+const commandPaletteInput = document.getElementById("command-palette-input");
+const commandPaletteList = document.getElementById("command-palette-list");
+const btnTriggerPalette = document.getElementById("btn-trigger-command-palette");
+
+const commandActions = [
+    { title: "⚡ Crear Nuevo Ticket", action: () => { if (headerNewTicketBtn) headerNewTicketBtn.click(); } },
+    { title: "📊 Cambiar a Vista Lista / Kanban", action: () => { if (btnToggleView) btnToggleView.click(); } },
+    { title: "🌙 Cambiar Tema Claro/Oscuro", action: () => { document.getElementById("theme-toggle").click(); } },
+    { title: "👤 Ver Mis Tickets Asignados", action: () => { navGlobalMine.click(); } },
+    { title: "🏠 Ver Todos los Tickets", action: () => { navGlobalAll.click(); } }
+];
+
+function openCommandPalette() {
+    if (!commandPaletteModal) return;
+    commandPaletteModal.style.display = "flex";
+    commandPaletteInput.value = "";
+    renderCommandActions(commandActions);
+    setTimeout(() => commandPaletteInput.focus(), 100);
+}
+
+function closeCommandPalette() {
+    if (commandPaletteModal) commandPaletteModal.style.display = "none";
+}
+
+function renderCommandActions(actions) {
+    if (!commandPaletteList) return;
+    commandPaletteList.innerHTML = actions.map((act, i) => `
+        <div class="command-item ${i === 0 ? 'selected' : ''}" data-index="${i}">
+            <span>${act.title}</span>
+            <kbd style="font-size:0.7rem; background:var(--bg-app); padding:2px 6px; border-radius:4px;">Enter</kbd>
+        </div>
+    `).join("");
+
+    commandPaletteList.querySelectorAll(".command-item").forEach((item, idx) => {
+        item.addEventListener("click", () => {
+            actions[idx].action();
+            closeCommandPalette();
+        });
+    });
+}
+
+if (btnTriggerPalette) btnTriggerPalette.addEventListener("click", openCommandPalette);
+
+document.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        openCommandPalette();
+    }
+    if (e.key === "Escape") {
+        closeCommandPalette();
+        if (profileModal) profileModal.style.display = "none";
+        if (usersModal) usersModal.style.display = "none";
+        if (membersModal) membersModal.style.display = "none";
+        if (archivedModal) archivedModal.style.display = "none";
+        if (githubModal) githubModal.style.display = "none";
+    }
+});
+
+if (commandPaletteInput) {
+    commandPaletteInput.addEventListener("input", (e) => {
+        const query = e.target.value.toLowerCase();
+        const filtered = commandActions.filter(a => a.title.toLowerCase().includes(query));
+        renderCommandActions(filtered);
+    });
+}
+
+// NAVEGACION Y PROYECTOS
+if (navGlobalAll) {
+    navGlobalAll.addEventListener("click", (e) => {
+        e.preventDefault();
+        document.querySelectorAll(".nav-item").forEach(el => el.classList.remove("active"));
+        navGlobalAll.classList.add("active");
+        
+        currentProjectId = null;
+        document.getElementById("board-title").textContent = "Todos los tickets";
+        if (headerNewTicketBtn) headerNewTicketBtn.style.display = "none"; setProjectChrome(false);
+        
+        document.getElementById("project-home").style.display = "none";
+        document.getElementById("quick-filters").style.display = "flex";
+        
+        if (isListView) {
+            document.getElementById("list-container").style.display = "block";
+            boardContainer.style.display = "none";
+        } else {
+            boardContainer.style.display = "flex";
+            document.getElementById("list-container").style.display = "none";
+        }
+        fetchAndRenderTickets();
+    });
+}
+
+if (navGlobalMine) {
+    navGlobalMine.addEventListener("click", (e) => {
+        e.preventDefault();
+        document.querySelectorAll(".nav-item").forEach(el => el.classList.remove("active"));
+        navGlobalMine.classList.add("active");
+        
+        currentProjectId = null;
+        document.getElementById("board-title").textContent = "Mis tickets";
+        if (headerNewTicketBtn) headerNewTicketBtn.style.display = "none"; setProjectChrome(false);
+        
+        document.getElementById("project-home").style.display = "none";
+        document.getElementById("quick-filters").style.display = "flex";
+        
+        if (searchInput) searchInput.value = "@" + (currentUser ? currentUser.username : "adrian");
+        fetchAndRenderTickets();
+    });
+}
+
+const toggleSidebarBtn = document.getElementById('toggle-sidebar');
+const sidebar = document.getElementById('sidebar');
+
+if (toggleSidebarBtn && sidebar) {
+    toggleSidebarBtn.addEventListener('click', () => {
+        sidebar.classList.toggle('collapsed');
+    });
+}
+
+const themeToggleBtn = document.getElementById("theme-toggle");
+if (themeToggleBtn) {
+    themeToggleBtn.addEventListener("click", () => {
+        const next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+    });
+}
+
+// Seleccionar todos en la vista lista
+const selectAll = document.getElementById("select-all-tickets");
+if (selectAll) {
+    selectAll.addEventListener("change", () => {
+        document.querySelectorAll(".ticket-select-check").forEach(chk => {
+            chk.checked = selectAll.checked;
+            const id = parseInt(chk.dataset.id);
+            if (selectAll.checked) selectedTicketIds.add(id); else selectedTicketIds.delete(id);
+        });
+        updateBulkToolbar();
+    });
+}
+
+// Paleta de comandos: navegación con teclado
+if (commandPaletteInput) {
+    commandPaletteInput.addEventListener("keydown", (e) => {
+        const items = [...commandPaletteList.querySelectorAll(".command-item")];
+        if (!items.length) return;
+        let i = Math.max(items.findIndex(el => el.classList.contains("selected")), 0);
+        if (e.key === "Enter") { e.preventDefault(); items[i].click(); return; }
+        if (e.key === "ArrowDown") i = (i + 1) % items.length;
+        else if (e.key === "ArrowUp") i = (i - 1 + items.length) % items.length;
+        else return;
+        e.preventDefault();
+        items.forEach((el, k) => el.classList.toggle("selected", k === i));
+        items[i].scrollIntoView({ block: "nearest" });
+    });
+}
+
+
+// ===== v11: contexto de proyecto, dashboard, ticket rápido/completo, horas, cuenta =====
+function setProjectChrome(on) {
+    const tabs = document.getElementById("project-tabs");
+    if (tabs) tabs.style.display = on ? "flex" : "none";
+    if (btnToggleView) btnToggleView.style.display = on ? "none" : "";
+    if (on) setTab("home", false);
+}
+function setTab(tab, load = true) {
+    document.querySelectorAll("#project-tabs .tab").forEach(t => t.classList.toggle("active", t.dataset.tab === tab));
+    const home = document.getElementById("project-home"), qf = document.getElementById("quick-filters");
+    home.style.display = tab === "home" ? "block" : "none";
+    qf.style.display = tab === "home" ? "none" : "flex";
+    boardContainer.style.display = tab === "board" ? "flex" : "none";
+    listContainer.style.display = tab === "list" ? "block" : "none";
+    if (load && tab !== "home") fetchAndRenderTickets();
+}
+document.querySelectorAll("#project-tabs .tab").forEach(t => t.addEventListener("click", () => setTab(t.dataset.tab)));
+
+function renderProjectDashboard(tickets) {
+    const total = tickets.length, today = new Date().toLocaleDateString("sv-SE");
+    const by = (s) => tickets.filter(t => norm(t.status) === s).length;
+    const done = by("done"), late = tickets.filter(t => t.due_date && String(t.due_date).slice(0, 10) < today && norm(t.status) !== "done").length;
+    const pts = tickets.reduce((a, t) => a + (t.story_points || 0), 0), pct = total ? Math.round(done / total * 100) : 0;
+    const card = (n, l, x = "") => `<div class="stat-card"><div class="stat-num">${n}</div><div class="stat-label">${l}</div>${x}</div>`;
+    document.getElementById("home-stats").innerHTML =
+        card(total, "Tickets") + card(by("in_progress"), "En progreso") + card(late, "Vencidos") + card(pts, "Story points") +
+        card(pct + "%", "Completado", `<div class="progress"><i style="width:${pct}%"></i></div>`);
+    document.getElementById("home-breakdown").innerHTML = globalColumns.map(c => {
+        const id = statusIdOf(c.name), n = by(id);
+        return `<div class="bd-row" data-status="${id}"><span>${esc(titleCase(c.name))}</span><div class="bd-bar"><i style="width:${total ? n / total * 100 : 0}%"></i></div><span>${n}</span></div>`;
+    }).join("") || '<p class="empty-note">Sin columnas configuradas.</p>';
+}
+
+function fillStatusOptions(sel) {
+    const el = document.getElementById("ticket-status");
+    if (!el || !globalColumns.length) return;
+    el.innerHTML = globalColumns.map(c => `<option value="${statusIdOf(c.name)}">${esc(titleCase(c.name))}</option>`).join("");
+    el.value = norm(sel) || statusIdOf(globalColumns[0].name);
+}
+
+// Panel: columnas principal/lateral y modo completo
+(function () {
+    const f = document.getElementById("ticket-form"); if (!f) return;
+    const actions = f.querySelector(".form-actions"), title = document.getElementById("ticket-title").closest(".form-group");
+    const cols = document.createElement("div"), main = document.createElement("div"), side = document.createElement("div");
+    cols.className = "fp-cols"; main.className = "fp-main"; side.className = "fp-side";
+    const isMain = el => el.id === "checklist-section" || el.id === "history-section" || el.querySelector("#ticket-desc, #ticket-github-activity, #ticket-comments-list");
+    [...f.children].forEach(k => { if (k === actions || k === title || k.type === "hidden") return; if (k.querySelector && k.querySelector("#ticket-desc")) k.classList.add("keep");
+        (isMain(k) ? main : side).appendChild(k); });
+    cols.append(main, side); f.insertBefore(cols, actions);
+    document.getElementById("btn-expand-panel").addEventListener("click", () => sidePanel.classList.toggle("full"));
+})();
+
+// Registro de horas (localStorage hasta que exista endpoint /tickets/{id}/worklogs)
+const wlKey = id => `pyckets_worklogs_${id}`;
+const loadWl = id => { try { return JSON.parse(localStorage.getItem(wlKey(id)) || "[]"); } catch { return []; } };
+function renderWorklogs(id) {
+    const logs = loadWl(id), total = logs.reduce((a, l) => a + l.h, 0);
+    document.getElementById("worklog-total").textContent = `${+total.toFixed(2)} h`;
+    document.getElementById("worklog-list").innerHTML = logs.slice().reverse().slice(0, 5).map(l =>
+        `<div class="worklog-item"><span>${l.h} h${l.note ? " · " + esc(l.note) : ""}</span><span>@${esc(l.by || "?")} · ${new Date(l.at).toLocaleDateString("es-ES", { day: "numeric", month: "short" })}</span></div>`).join("");
+}
+document.getElementById("btn-log-time").addEventListener("click", () => {
+    const hrs = parseFloat(document.getElementById("worklog-hours").value);
+    if (!(hrs > 0) || !editingTicket) return;
+    const logs = loadWl(editingTicket.id);
+    logs.push({ h: hrs, note: document.getElementById("worklog-note").value.trim(), by: currentUser && currentUser.username, at: Date.now() });
+    localStorage.setItem(wlKey(editingTicket.id), JSON.stringify(logs));
+    document.getElementById("worklog-hours").value = ""; document.getElementById("worklog-note").value = "";
+    renderWorklogs(editingTicket.id);
+});
+
+// Menú de cuenta
+const accMenu = document.getElementById("account-menu");
+document.getElementById("btn-account").addEventListener("click", (e) => { e.stopPropagation(); accMenu.style.display = accMenu.style.display === "none" ? "block" : "none"; });
+document.addEventListener("click", () => { accMenu.style.display = "none"; });
+document.getElementById("menu-profile").addEventListener("click", () => btnOpenProfile.click());
+
+const btnGoBoard = document.getElementById("btn-go-board");
+if (btnGoBoard) btnGoBoard.addEventListener("click", () => setTab("board"));

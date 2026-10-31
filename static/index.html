@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pyckets</title>
-    <link rel="stylesheet" href="/static/styles.css?v=v8.2">
+    <link rel="stylesheet" href="/static/styles.css?v=v11.1">
 </head>
 <body>
 
@@ -13,64 +13,67 @@
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <div class="logo">
-                    <span class="logo-icon">🚀</span>
+                    <span class="logo-icon">⚡</span>
                     <span class="logo-text">Pyckets</span>
                 </div>
-                <button id="toggle-sidebar" class="icon-btn" title="Plegar lateral">📑</button>
+                <button id="toggle-sidebar" class="icon-btn" title="Plegar lateral"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
             </div>
 
-            <div class="search-container" style="padding: 0 1rem; margin-bottom: 1rem;">
-                <button id="focus-search" class="btn secondary full-width" style="justify-content: space-between; font-weight: normal; color: var(--text-muted);">
-                    <span>🔍 Buscar...</span>
+            <div class="search-container" style="padding: 0 1rem; margin-bottom: 0.5rem;">
+                <button id="btn-trigger-command-palette" class="btn secondary full-width" style="justify-content: space-between; font-weight: normal; color: var(--text-muted);">
+                    <span>Buscar o ejecutar…</span>
                     <kbd style="font-size: 0.7rem; background: var(--bg-app); padding: 2px 4px; border-radius: 4px;">Ctrl+K</kbd>
                 </button>
             </div>
 
             <nav class="sidebar-nav">
-                <div class="nav-section-label">VISTAS GLOBALES</div>
+                <div class="nav-section-label">Vistas</div>
                 <a href="#" id="nav-global-all" class="nav-item active">
-                    <span class="icon">🏠</span> <span class="text">Todos los Tickets</span>
+                    <span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11 12 3l9 8"/><path d="M5 10v10h14V10"/></svg></span> <span class="text">Todos los tickets</span>
                 </a>
                 <a href="#" id="nav-global-mine" class="nav-item">
-                    <span class="icon">👤</span> <span class="text">Mis Tickets</span>
+                    <span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg></span> <span class="text">Mis tickets</span>
                 </a>
 
-                <div class="nav-section-label" style="display: flex; justify-content: space-between; align-items: center; margin-top: 1.5rem;">
-                    <span>PROYECTOS</span>
+                <div class="nav-section-label" style="display: flex; justify-content: space-between; align-items: center; margin-top: 1.2rem;">
+                    <span>Proyectos</span>
                     <button id="btn-open-create-project" class="icon-btn small" title="Nuevo Proyecto">+</button>
                 </div>
                 <div id="project-list"></div>
             </nav>
 
             <div class="sidebar-footer">
-                <button id="nav-manage-users" class="nav-item" style="display: none;">
-                    <span class="icon">👥</span> <span class="text">Gestión de Usuarios</span>
-                </button>
-                <button id="nav-archived-projects" class="nav-item">
-                    <span class="icon">📦</span> <span class="text">Archivados</span>
-                </button>
-                <button id="btn-logout" class="nav-item" style="color: #ff5630;">
-                    <span class="icon">🚪</span> <span class="text">Cerrar Sesión</span>
-                </button>
+                <div id="account-menu" class="account-menu" style="display:none">
+                    <button id="menu-profile" class="nav-item"><span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg></span><span class="text">Mi perfil</span></button>
+                    <button id="nav-manage-users" class="nav-item" style="display:none"><span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.5"/><path d="M2 20c0-3.5 3-5.5 7-5.5s7 2 7 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7"/></svg></span><span class="text">Gestión de usuarios</span></button>
+                    <button id="nav-archived-projects" class="nav-item"><span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11h14V8"/><path d="M10 12h4"/></svg></span><span class="text">Proyectos archivados</span></button>
+                    <button id="btn-logout" class="nav-item danger"><span class="icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4H5v16h4"/><path d="M16 8l4 4-4 4"/><path d="M20 12H9"/></svg></span><span class="text">Cerrar sesión</span></button>
+                </div>
+                <button id="btn-account" class="account-btn"><span id="side-avatar" class="avatar-badge">🚀</span><span class="text" id="side-user">usuario</span></button>
             </div>
         </aside>
 
         <!-- CONTENIDO PRINCIPAL -->
         <main class="main-content">
             <header class="top-header">
-                <h2 id="board-title" style="margin: 0; font-size: 1.25rem;">Todos los Tickets</h2>
+                <h2 id="board-title" style="margin: 0; font-size: 1.2rem;">Todos los Tickets</h2>
+                <div id="project-tabs" class="tabs" style="display:none">
+                    <button class="tab active" data-tab="home">Resumen</button>
+                    <button class="tab" data-tab="board">Tablero</button>
+                    <button class="tab" data-tab="list">Lista</button>
+                </div>
                 
                 <div class="controls" style="display: flex; align-items: center; gap: 0.75rem;">
                     <div class="search-container" style="position: relative;">
-                        <input type="text" id="search-filter" class="filter-input" style="width: 280px;" placeholder='Filtrar: @adrian, #bug, is:done...' autocomplete="off">
+                        <input type="text" id="search-filter" class="filter-input" style="width: 280px;" placeholder='Filtrar: @adrian, #bug, priority:high...' autocomplete="off">
                         <div id="omnibar-suggestions" class="suggestions-dropdown" style="display: none;"></div>
                     </div>
                     
                     <button id="toggle-view" class="btn">Vista Lista</button>
-                    <button id="header-new-ticket" class="btn primary" style="display: none;">+ Nuevo Ticket</button>
+                    <button id="header-new-ticket" class="btn primary" style="display: none;">Nuevo ticket</button>
                     <button id="theme-toggle" class="icon-btn" title="Cambiar tema">🌙</button>
 
-                    <div id="btn-open-profile" class="user-profile-btn" title="Mi Perfil">
+                    <div id="btn-open-profile" class="user-profile-btn" style="cursor: pointer; display: flex; align-items: center; gap: 0.4rem;" title="Mi Perfil">
                         <span id="user-avatar-badge" class="avatar-badge">🚀</span>
                         <span id="user-handle-text" style="font-size: 0.85rem; font-weight: 600;">@usuario</span>
                     </div>
@@ -79,34 +82,23 @@
 
             <div id="quick-filters" class="quick-filters-bar"></div>
 
-            <!-- VISTA PROYECTO HOME -->
+            <!-- RESUMEN PROYECTO HOME -->
             <div id="project-home" style="display: none; padding: 2rem; overflow-y: auto;">
                 <h2 id="home-project-name">Resumen del Proyecto</h2>
-                <div style="display: flex; gap: 1.5rem; margin-top: 1rem;">
-                    <div class="stat-card">
-                        <span class="stat-num" id="stat-total">0</span>
-                        <span class="stat-label">Total Tickets</span>
-                    </div>
-                    <div class="stat-card">
-                        <span class="stat-num" id="stat-done">0</span>
-                        <span class="stat-label">Completados</span>
-                    </div>
-                </div>
+                <div id="home-stats" class="stats-grid"></div>
+                <div id="home-breakdown" class="breakdown"></div>
 
                 <div style="margin-top: 1.5rem; display: flex; gap: 0.8rem; flex-wrap: wrap;">
                     <button id="btn-go-board" class="btn primary">Ir al Tablero Kanban</button>
-                    <button id="btn-project-members" class="btn">👥 Miembros</button>
-                    <button id="btn-project-repos" class="btn">🐙 Repositorios GitHub</button>
-                    <button id="btn-sync-github" class="btn" style="background: var(--sidebar-hover);">🔄 Sincronizar GitHub</button>
-                    <button id="btn-archive-project" class="btn" style="color: #ff5630; border-color: #ff5630;">📦 Archivar</button>
+                    <button id="btn-project-members" class="btn">Miembros</button>
+                    <button id="btn-project-repos" class="btn">Repositorios GitHub</button>
+                    <button id="btn-sync-github" class="btn">Sincronizar GitHub</button>
+                    <button id="btn-archive-project" class="btn danger">Archivar</button>
                 </div>
 
-                <!-- FEED GLOBAL DE ACTIVIDAD GITHUB EN EL PROYECTO -->
                 <div style="margin-top: 2rem;">
-                    <h3 style="margin-bottom: 0.8rem;">📜 Feed de Actividad de GitHub en el Proyecto</h3>
-                    <div id="project-github-feed" style="background: var(--bg-card); border: 1px solid var(--sidebar-border); border-radius: 8px; padding: 1rem; max-height: 300px; overflow-y: auto;">
-                        <p style="color: var(--text-muted); font-size: 0.9rem;">Cargando actividad...</p>
-                    </div>
+                    <h3 style="margin-bottom: 0.8rem;">Actividad de GitHub</h3>
+                    <div id="project-github-feed" class="feed-box"></div>
                 </div>
             </div>
 
@@ -118,13 +110,14 @@
                 <table class="tickets-table">
                     <thead>
                         <tr>
+                            <th style="width: 30px;"><input type="checkbox" id="select-all-tickets"></th>
                             <th>ID</th>
+                            <th>Tipo y prioridad</th>
                             <th>Título</th>
                             <th>Estado</th>
-                            <th>Epic</th>
                             <th>Asignado</th>
-                            <th>Fecha Límite</th>
-                            <th>Etiquetas</th>
+                            <th>Fecha límite</th>
+                            <th>Story Points</th>
                         </tr>
                     </thead>
                     <tbody id="ticket-list-body"></tbody>
@@ -133,24 +126,82 @@
         </main>
     </div>
 
-    <!-- PANEL LATERAL CREAR/EDITAR TICKET -->
+    <!-- BARRA FLOTANTE ACCIONES EN LOTE -->
+    <div id="bulk-actions-bar" class="bulk-toolbar" style="display: none;">
+        <span id="bulk-selected-count" style="font-weight: 600; font-size: 0.9rem;">0 seleccionados</span>
+        <select id="bulk-status-select" class="btn" style="padding: 4px 8px;">
+            <option value="">Cambiar Estado...</option>
+            <option value="todo">Por Hacer</option>
+            <option value="in_progress">En Progreso</option>
+            <option value="done">Hecho</option>
+        </select>
+        <select id="bulk-priority-select" class="btn" style="padding: 4px 8px;">
+            <option value="">Cambiar Prioridad...</option>
+            <option value="LOW">Baja</option>
+            <option value="MEDIUM">Media</option>
+            <option value="HIGH">Alta</option>
+            <option value="URGENT">Urgente</option>
+        </select>
+        <button id="btn-apply-bulk" class="btn primary small">Aplicar Cambios</button>
+        <button id="btn-cancel-bulk" class="icon-btn">&times;</button>
+    </div>
+
+    <!-- PANEL LATERAL TICKET -->
     <div id="side-panel" class="side-panel">
         <div class="panel-header">
             <h3 id="panel-title">Nuevo Ticket</h3>
+            <button type="button" id="btn-expand-panel" class="icon-btn" title="Abrir ticket completo">⤢</button>
             <button id="close-panel" class="icon-btn">&times;</button>
         </div>
         <form id="ticket-form" class="panel-body">
             <input type="hidden" id="ticket-id">
+            
             <div class="form-group">
                 <label>Título</label>
                 <input type="text" id="ticket-title" required placeholder="Resumen del ticket...">
             </div>
 
-            <!-- GENERADOR / COPIADOR DE NOMBRE DE RAMA -->
+            <div style="display: flex; gap: 0.5rem;">
+                <div class="form-group" style="flex: 1;">
+                    <label>Tipo</label>
+                    <select id="ticket-type">
+                        <option value="TASK">Tarea</option>
+                        <option value="BUG">Bug / Error</option>
+                        <option value="FEATURE">Nueva Feature</option>
+                        <option value="EPIC">Épica</option>
+                    </select>
+                </div>
+                <div class="form-group" style="flex: 1;">
+                    <label>Prioridad</label>
+                    <select id="ticket-priority">
+                        <option value="LOW">Baja</option>
+                        <option value="MEDIUM" selected>Media</option>
+                        <option value="HIGH">Alta</option>
+                        <option value="URGENT">Urgente</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Estado</label>
+                <select id="ticket-status"><option value="todo">Todo</option></select>
+            </div>
+
+            <div class="form-group" id="worklog-section">
+                <label>Tiempo registrado</label>
+                <div id="worklog-total">0 h</div>
+                <div class="worklog-row">
+                    <input type="number" id="worklog-hours" min="0" step="0.25" placeholder="Horas">
+                    <input type="text" id="worklog-note" placeholder="Nota (opcional)">
+                    <button type="button" id="btn-log-time" class="btn">Registrar</button>
+                </div>
+                <div id="worklog-list" style="margin-top:0.5rem"></div>
+            </div>
+
             <div id="branch-generator-box" class="form-group" style="display: none; background: var(--sidebar-hover); padding: 8px 12px; border-radius: 6px;">
-                <label style="font-size: 0.75rem; color: var(--text-muted);">🌿 Nombre de Rama Sugerido</label>
+                <label style="font-size: 0.75rem; color: var(--text-muted);">Rama sugerida</label>
                 <div style="display: flex; gap: 0.5rem; align-items: center; margin-top: 4px;">
-                    <code id="branch-name-text" style="font-size: 0.8rem; flex: 1; overflow-x: auto; white-space: nowrap;">feature/TB-x</code>
+                    <code id="branch-name-text" style="font-size: 0.8rem; flex: 1; overflow-x: auto;">feature/TB-x</code>
                     <button type="button" id="btn-copy-branch" class="btn" style="padding: 2px 8px; font-size: 0.75rem;">Copiar</button>
                 </div>
             </div>
@@ -159,6 +210,17 @@
                 <label>Descripción</label>
                 <textarea id="ticket-desc" rows="3" placeholder="Detalles de la tarea..."></textarea>
             </div>
+
+            <!-- CHECKLIST INTERNA -->
+            <div id="checklist-section" class="form-group" style="display: none; border-top: 1px solid var(--sidebar-border); padding-top: 0.8rem;">
+                <label>Subtareas</label>
+                <div id="checklist-items-list" style="margin-bottom: 0.5rem;"></div>
+                <div style="display: flex; gap: 0.4rem;">
+                    <input type="text" id="new-checklist-item" placeholder="Añadir paso..." style="font-size: 0.8rem; padding: 4px 8px;">
+                    <button type="button" id="btn-add-checklist" class="btn secondary" style="padding: 4px 8px; font-size: 0.8rem;">Añadir</button>
+                </div>
+            </div>
+
             <div style="display: flex; gap: 0.5rem;">
                 <div class="form-group" style="flex: 1;">
                     <label>Epic</label>
@@ -169,44 +231,48 @@
                     <input type="text" id="ticket-assignee" placeholder="Ej: adrian">
                 </div>
             </div>
+
             <div style="display: flex; gap: 0.5rem;">
                 <div class="form-group" style="flex: 1;">
-                    <label>Fecha Límite</label>
+                    <label>Fecha límite</label>
                     <input type="date" id="ticket-due">
                 </div>
                 <div class="form-group" style="flex: 1;">
-                    <label>Tiempo (horas)</label>
-                    <input type="number" id="ticket-time" min="0" placeholder="0">
+                    <label>Story Points</label>
+                    <input type="number" id="ticket-story-points" min="0" placeholder="1, 2, 3, 5...">
                 </div>
             </div>
+
             <div class="form-group">
                 <label>Etiquetas (separadas por coma)</label>
                 <input type="text" id="ticket-tags" placeholder="bug, frontend, urgente">
             </div>
 
-            <!-- ACTIVIDAD GITHUB EN EL TICKET -->
+            <!-- HISTORIAL DE AUDITORÍA -->
+            <div id="history-section" class="form-group" style="display: none; border-top: 1px solid var(--sidebar-border); padding-top: 0.8rem;">
+                <label>Historial</label>
+                <div id="ticket-history-list" style="max-height: 120px; overflow-y: auto;"></div>
+            </div>
+
+            <!-- ACTIVIDAD GITHUB -->
             <div class="form-group" style="margin-top: 1rem; border-top: 1px solid var(--sidebar-border); padding-top: 1rem;">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <label>🐙 Actividad en GitHub</label>
+                    <label>Actividad en GitHub</label>
                     <button type="button" id="btn-toggle-manual-commit" class="btn" style="padding: 2px 8px; font-size: 0.75rem;">+ Enlazar Commit</button>
                 </div>
-
-                <!-- VINCULACIÓN MANUAL COMMIT -->
                 <div id="manual-commit-form" style="display: none; margin-top: 0.5rem; background: var(--sidebar-hover); padding: 8px; border-radius: 6px;">
                     <input type="text" id="manual-commit-sha" placeholder="SHA (ej: a1b2c3d)" style="width: 100%; margin-bottom: 4px; font-size: 0.8rem;">
                     <input type="text" id="manual-commit-msg" placeholder="Mensaje del commit" style="width: 100%; margin-bottom: 4px; font-size: 0.8rem;">
-                    <input type="text" id="manual-commit-url" placeholder="URL directa en GitHub (opcional)" style="width: 100%; margin-bottom: 6px; font-size: 0.8rem;">
+                    <input type="text" id="manual-commit-url" placeholder="URL directa en GitHub" style="width: 100%; margin-bottom: 6px; font-size: 0.8rem;">
                     <button type="button" id="btn-save-manual-commit" class="btn primary" style="width: 100%; padding: 4px; font-size: 0.8rem;">Guardar Enlace</button>
                 </div>
-
                 <div id="ticket-github-activity" style="font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem;"></div>
             </div>
 
-            <!-- SECCIÓN DE COMENTARIOS Y ADJUNTOS -->
+            <!-- COMENTARIOS Y ADJUNTOS -->
             <div class="form-group" style="margin-top: 1rem; border-top: 1px solid var(--sidebar-border); padding-top: 1rem;">
-                <label>💬 Comentarios y Notas</label>
-                <div id="ticket-comments-list" style="max-height: 200px; overflow-y: auto; margin-bottom: 0.8rem;"></div>
-
+                <label>Comentarios</label>
+                <div id="ticket-comments-list" style="max-height: 180px; overflow-y: auto; margin-bottom: 0.8rem;"></div>
                 <div style="display: flex; flex-direction: column; gap: 0.5rem;">
                     <textarea id="comment-text" rows="2" placeholder="Escribe un comentario..." style="width: 100%;"></textarea>
                     <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -218,19 +284,28 @@
 
             <div class="form-actions">
                 <button type="button" id="cancel-ticket" class="btn">Cancelar</button>
-                <button type="submit" class="btn primary">Guardar Ticket</button>
+                <button type="submit" class="btn primary">Guardar ticket</button>
             </div>
         </form>
     </div>
 
+    <div id="panel-overlay" class="panel-overlay"></div>
+
+    <!-- COMMAND PALETTE MODAL (CTRL + K) -->
+    <div id="command-palette-modal" class="modal-overlay" style="display: none;">
+        <div class="command-palette">
+            <input type="text" id="command-palette-input" class="command-input" placeholder="Escribe una acción o busca... (ej: 'nuevo', 'kanban', 'miembros')...">
+            <div id="command-palette-list" class="command-list"></div>
+        </div>
+    </div>
+
     <!-- MODAL REPOSITORIOS GITHUB -->
     <div id="github-modal" class="modal-overlay" style="display: none;">
-        <div class="modal-content" style="width: 520px;">
+        <div class="modal-content" style="width: 520px; background: var(--sidebar-bg); padding: 1.5rem; border-radius: 8px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                <h3 style="margin: 0;">🐙 Repositorios de GitHub</h3>
+                <h3 style="margin: 0;">Repositorios de GitHub</h3>
                 <button id="close-github-modal" class="icon-btn">&times;</button>
             </div>
-
             <form id="link-repo-form" style="margin-bottom: 1.5rem; background: var(--sidebar-hover); padding: 1rem; border-radius: 6px;">
                 <h4 style="margin-top: 0; margin-bottom: 0.8rem;">Vincular Repositorio</h4>
                 <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
@@ -249,24 +324,23 @@
                 </div>
                 <button type="submit" class="btn primary full-width">Verificar y Vincular</button>
             </form>
-
             <h4>Repositorios Vinculados</h4>
-            <div id="project-repos-list" style="max-height: 200px; overflow-y: auto;"></div>
+            <div id="project-repos-list" style="max-height: 180px; overflow-y: auto;"></div>
         </div>
     </div>
 
     <!-- MODAL NUEVO PROYECTO -->
     <div id="project-modal" class="modal-overlay" style="display: none;">
-        <div class="modal-content" style="width: 350px;">
+        <div class="modal-content" style="width: 350px; background: var(--sidebar-bg); padding: 1.5rem; border-radius: 8px;">
             <h3>Nuevo Proyecto</h3>
             <form id="project-form">
                 <div class="form-group">
                     <label>Nombre del Proyecto</label>
-                    <input type="text" id="new-project-name" required placeholder="Mi Proyecto">
+                    <input type="text" id="new-project-name" required placeholder="Ej: App Móvil">
                 </div>
                 <div class="form-group">
                     <label>Color</label>
-                    <input type="color" id="new-project-color" value="#ff5630" style="width: 100%; height: 40px; cursor: pointer;">
+                    <input type="color" id="new-project-color" value="#6366f1" style="width: 100%; height: 40px; cursor: pointer;">
                 </div>
                 <div class="form-actions">
                     <button type="button" id="close-project-modal" class="btn">Cancelar</button>
@@ -276,28 +350,9 @@
         </div>
     </div>
 
-    <!-- MODAL LOGIN -->
-    <div id="login-screen" class="modal-overlay" style="display: flex;">
-        <div class="modal-content" style="width: 360px;">
-            <h2 style="margin-top: 0; text-align: center;">🚀 Pyckets Login</h2>
-            <form id="login-form">
-                <div class="form-group">
-                    <label>Usuario</label>
-                    <input type="text" id="login-username" required autocomplete="username" value="adrian">
-                </div>
-                <div class="form-group">
-                    <label>Contraseña</label>
-                    <input type="password" id="login-password" required autocomplete="current-password" value="admin123">
-                </div>
-                <div id="login-error" style="color: #ff5630; font-size: 0.85rem; margin-bottom: 1rem; display: none;"></div>
-                <button type="submit" class="btn primary full-width">Iniciar Sesión</button>
-            </form>
-        </div>
-    </div>
-
     <!-- MODAL PROYECTOS ARCHIVADOS -->
     <div id="archived-projects-modal" class="modal-overlay" style="display: none;">
-        <div class="modal-content" style="width: 450px;">
+        <div class="modal-content" style="width: 450px; background: var(--sidebar-bg); padding: 1.5rem; border-radius: 8px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
                 <h3 style="margin: 0;">Proyectos Archivados</h3>
                 <button id="close-archived-modal" class="icon-btn">&times;</button>
@@ -308,26 +363,23 @@
 
     <!-- MODAL PERFIL DE USUARIO -->
     <div id="profile-modal" class="modal-overlay" style="display: none;">
-        <div class="modal-content" style="width: 480px;">
+        <div class="modal-content" style="width: 480px; background: var(--sidebar-bg); padding: 1.5rem; border-radius: 8px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                <h3 style="margin: 0;">👤 Mi Perfil</h3>
+                <h3 style="margin: 0;">Mi perfil</h3>
                 <button id="close-profile-modal" class="icon-btn">&times;</button>
             </div>
 
             <form id="profile-form">
                 <div class="form-group">
                     <label>Icono de Avatar</label>
-                    <div class="avatar-selector" id="avatar-picker">
-                        <span class="avatar-option" data-avatar="🦊">🦊</span>
-                        <span class="avatar-option" data-avatar="🐶">🐶</span>
-                        <span class="avatar-option" data-avatar="🐱">🐱</span>
-                        <span class="avatar-option" data-avatar="🦁">🦁</span>
-                        <span class="avatar-option" data-avatar="🐼">🐼</span>
-                        <span class="avatar-option" data-avatar="🐸">🐸</span>
-                        <span class="avatar-option" data-avatar="🐨">🐨</span>
-                        <span class="avatar-option" data-avatar="🦄">🦄</span>
-                        <span class="avatar-option" data-avatar="🤖">🤖</span>
-                        <span class="avatar-option" data-avatar="🚀">🚀</span>
+                    <div class="avatar-selector" id="avatar-picker" style="display: flex; gap: 0.5rem; overflow-x: auto; padding: 0.4rem 0;">
+                        <span class="avatar-option" data-avatar="🦊" style="font-size: 1.5rem; cursor: pointer;">🦊</span>
+                        <span class="avatar-option" data-avatar="🐶" style="font-size: 1.5rem; cursor: pointer;">🐶</span>
+                        <span class="avatar-option" data-avatar="🐱" style="font-size: 1.5rem; cursor: pointer;">🐱</span>
+                        <span class="avatar-option" data-avatar="🦁" style="font-size: 1.5rem; cursor: pointer;">🦁</span>
+                        <span class="avatar-option" data-avatar="🐼" style="font-size: 1.5rem; cursor: pointer;">🐼</span>
+                        <span class="avatar-option" data-avatar="🐸" style="font-size: 1.5rem; cursor: pointer;">🐸</span>
+                        <span class="avatar-option" data-avatar="🚀" style="font-size: 1.5rem; cursor: pointer;">🚀</span>
                     </div>
                 </div>
 
@@ -356,8 +408,8 @@
                 <div class="form-group">
                     <label>Tema Preferido</label>
                     <select id="profile-theme" style="width: 100%; padding: 8px;">
-                        <option value="dark">Modo Oscuro 🌙</option>
-                        <option value="light">Modo Claro ☀️</option>
+                        <option value="dark">Oscuro</option>
+                        <option value="light">Claro</option>
                     </select>
                 </div>
 
@@ -381,7 +433,7 @@
 
     <!-- MODAL GESTIÓN GLOBAL DE USUARIOS -->
     <div id="users-modal" class="modal-overlay" style="display: none;">
-        <div class="modal-content" style="width: 500px;">
+        <div class="modal-content" style="width: 500px; background: var(--sidebar-bg); padding: 1.5rem; border-radius: 8px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
                 <h3 style="margin: 0;">Gestión Global de Usuarios</h3>
                 <button id="close-users-modal" class="icon-btn">&times;</button>
@@ -406,7 +458,7 @@
 
     <!-- MODAL MIEMBROS DEL PROYECTO -->
     <div id="members-modal" class="modal-overlay" style="display: none;">
-        <div class="modal-content" style="width: 500px;">
+        <div class="modal-content" style="width: 500px; background: var(--sidebar-bg); padding: 1.5rem; border-radius: 8px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
                 <h3 style="margin: 0;">Miembros del Proyecto</h3>
                 <button id="close-members-modal" class="icon-btn">&times;</button>
@@ -428,6 +480,25 @@
         </div>
     </div>
 
-    <script src="/static/app.js?v=v8.2"></script>
+    <!-- MODAL LOGIN -->
+    <div id="login-screen" class="modal-overlay" style="display: flex;">
+        <div class="modal-content" style="width: 360px; background: var(--sidebar-bg); padding: 2rem; border-radius: 12px; border: 1px solid var(--sidebar-border);">
+            <h2 style="margin-top: 0; text-align: center; margin-bottom: 1.5rem;">Inicia sesión en Pyckets</h2>
+            <form id="login-form">
+                <div class="form-group">
+                    <label>Usuario</label>
+                    <input type="text" id="login-username" required value="adrian">
+                </div>
+                <div class="form-group">
+                    <label>Contraseña</label>
+                    <input type="password" id="login-password" required value="admin123">
+                </div>
+                <div id="login-error" style="color: #ef4444; font-size: 0.85rem; margin-bottom: 1rem; display: none;"></div>
+                <button type="submit" class="btn primary full-width">Iniciar Sesión</button>
+            </form>
+        </div>
+    </div>
+
+    <script src="/static/app.js?v=v11.1"></script>
 </body>
 </html>
