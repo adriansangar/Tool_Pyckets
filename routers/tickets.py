@@ -14,7 +14,7 @@ from auth import (
     get_current_user_from_token, check_project_permission,
 )
 from config import UPLOAD_DIR, MAX_UPLOAD_BYTES, ALLOWED_IMAGE_EXT
-from permissions import READ_ROLES, WRITE_ROLES, get_ticket_or_404, authorize_ticket, validate_status
+from permissions import authorize_ticket_edit, is_project_admin, validate_epic, READ_ROLES, WRITE_ROLES, get_ticket_or_404, authorize_ticket, validate_status
 from schemas import (
     StatusUpdate, TicketUpdate, BulkStatusUpdate, ChecklistCreate, ChecklistUpdate,
 )
@@ -52,6 +52,13 @@ def create_ticket(
             raise HTTPException(status_code=403, detail="Un ticket debe pertenecer a un proyecto")
     else:
         check_project_permission(ticket.project_id, current_user, session, WRITE_ROLES)
+    admin = ticket.project_id is None or is_project_admin(ticket.project_id, current_user, session)
+    if not admin:
+        if ticket.assignee and ticket.assignee != current_user.username:
+            raise HTTPException(status_code=403, detail="Solo un admin del proyecto puede asignar tickets a otras personas")
+        if (ticket.epic or "").strip():
+            raise HTTPException(status_code=403, detail="Solo un admin del proyecto puede asignar épicas")
+    ticket.epic = validate_epic(session, ticket.project_id, ticket.epic)
     if isinstance(ticket.due_date, str):
         ticket.due_date = datetime.strptime(ticket.due_date, "%Y-%m-%d").date() if ticket.due_date.strip() else None
     ticket.id = None
@@ -72,9 +79,20 @@ def update_full_ticket(
     session: Session = Depends(get_session)
 ):
     db_ticket = get_ticket_or_404(session, ticket_id)
-    authorize_ticket(db_ticket, current_user, session, WRITE_ROLES)
+    authorize_ticket_edit(db_ticket, current_user, session)
 
     changes = ticket_update.model_dump(exclude_unset=True)
+    admin = db_ticket.project_id is None or is_project_admin(db_ticket.project_id, current_user, session)
+    if not admin:
+        for restricted in ("assignee", "project_id", "epic", "parent_id"):
+            if restricted in changes and changes[restricted] != getattr(db_ticket, restricted):
+                raise HTTPException(status_code=403, detail=f"Solo un admin del proyecto puede cambiar: {restricted}")
+    moving = "project_id" in changes and changes["project_id"] is not None and changes["project_id"] != db_ticket.project_id
+    target_project = changes["project_id"] if moving else db_ticket.project_id
+    if "epic" in changes:
+        changes["epic"] = validate_epic(session, target_project, changes["epic"])
+    elif moving:
+        changes["epic"] = None   # las épicas son por proyecto: al mover de proyecto se limpia
     if "project_id" in changes and changes["project_id"] != db_ticket.project_id and changes["project_id"] is not None:
         check_project_permission(changes["project_id"], current_user, session, WRITE_ROLES)
     if "status" in changes and changes["status"] is not None:
@@ -103,7 +121,7 @@ def update_ticket_status(
     session: Session = Depends(get_session)
 ):
     db_ticket = get_ticket_or_404(session, ticket_id)
-    authorize_ticket(db_ticket, current_user, session, WRITE_ROLES)
+    authorize_ticket_edit(db_ticket, current_user, session)
     new_status = validate_status(session, status_update.status)
     log_ticket_change(session, db_ticket.id, current_user.username, "status", db_ticket.status, new_status)
     db_ticket.status = new_status
@@ -178,7 +196,9 @@ def bulk_update_tickets(
 ):
     tickets = session.exec(select(Ticket).where(Ticket.id.in_(bulk.ticket_ids))).all()
     for t in tickets:
-        authorize_ticket(t, current_user, session, WRITE_ROLES)
+        authorize_ticket_edit(t, current_user, session)
+        if bulk.assignee is not None and t.project_id is not None and not is_project_admin(t.project_id, current_user, session):
+            raise HTTPException(status_code=403, detail="Solo un admin del proyecto puede reasignar tickets")
     if bulk.status:
         bulk.status = validate_status(session, bulk.status)
     for t in tickets:
@@ -211,7 +231,11 @@ def _get_item_and_authorize(item_id: int, user: User, session: Session, roles: l
     item = session.get(ChecklistItem, item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Elemento no encontrado")
-    authorize_ticket(get_ticket_or_404(session, item.ticket_id), user, session, roles)
+    ticket = get_ticket_or_404(session, item.ticket_id)
+    if roles is WRITE_ROLES:
+        authorize_ticket_edit(ticket, user, session)
+    else:
+        authorize_ticket(ticket, user, session, roles)
     return item
 
 
@@ -232,7 +256,7 @@ def add_checklist_item(
     current_user: User = Depends(get_current_user_from_token),
     session: Session = Depends(get_session)
 ):
-    authorize_ticket(get_ticket_or_404(session, ticket_id), current_user, session, WRITE_ROLES)
+    authorize_ticket_edit(get_ticket_or_404(session, ticket_id), current_user, session)
     if not item_in.content.strip():
         raise HTTPException(status_code=400, detail="El elemento está vacío")
     position = len(session.exec(select(ChecklistItem).where(ChecklistItem.ticket_id == ticket_id)).all())

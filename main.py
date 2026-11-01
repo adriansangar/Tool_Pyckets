@@ -12,7 +12,7 @@ from config import CORS_ORIGINS, GITHUB_SYNC_INTERVAL_SECONDS
 from database import create_db_and_tables, engine
 from models import User
 from services.github_sync import periodic_github_sync
-from routers import accounts, meta, projects, tickets, github
+from routers import accounts, meta, projects, tickets, github, epics, dashboard
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -45,5 +45,5 @@ if CORS_ORIGINS:
         allow_headers=["*"],
     )
 
-for _module in (accounts, meta, projects, tickets, github):
+for _module in (accounts, meta, projects, tickets, github, epics, dashboard):
     app.include_router(_module.router)

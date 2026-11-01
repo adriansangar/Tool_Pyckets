@@ -1,6 +1,6 @@
 """Esquemas Pydantic (entrada/salida de la API)."""
 from datetime import datetime, date
-from typing import List, Optional
+from typing import Dict, List, Optional
 from pydantic import BaseModel, field_validator
 
 from models import (
@@ -132,3 +132,112 @@ class ChecklistUpdate(BaseModel):
 class DependencyCreate(BaseModel):
     target_ticket_id: int
     dependency_type: DependencyType = DependencyType.RELATES_TO
+
+
+class ProjectOut(BaseModel):
+    id: int
+    name: str
+    color: str
+    accent_color: str
+    icon: str
+    is_archived: bool
+    my_role: Optional[str] = None
+
+class EpicCreate(BaseModel):
+    name: str
+    color: str = "#6366f1"
+    description: Optional[str] = None
+
+class EpicUpdate(BaseModel):
+    name: Optional[str] = None
+    color: Optional[str] = None
+    description: Optional[str] = None
+
+class EpicOut(BaseModel):
+    id: int
+    project_id: Optional[int] = None
+    name: str
+    color: str
+    description: Optional[str] = None
+    tickets_total: int = 0
+    tickets_done: int = 0
+
+
+# ---- Dashboards ----
+class TicketBrief(BaseModel):
+    id: int
+    title: str
+    status: str
+    priority: str
+    ticket_type: str
+    due_date: Optional[date] = None
+    assignee: Optional[str] = None
+    epic: Optional[str] = None
+    story_points: int = 0
+    project_id: Optional[int] = None
+    overdue: bool = False
+
+class ProjectCard(BaseModel):
+    id: int
+    name: str
+    color: str
+    icon: str
+    my_role: str
+    total: int = 0
+    done: int = 0
+    progress: int = 0
+    overdue: int = 0
+    my_open: int = 0
+    epics: int = 0
+    members: int = 0
+    by_status: Dict[str, int] = {}
+
+class ColumnCount(BaseModel):
+    status: str
+    name: str
+    count: int = 0
+    is_done: bool = False
+
+class EpicProgress(BaseModel):
+    id: Optional[int] = None
+    name: str
+    color: str
+    description: Optional[str] = None
+    total: int = 0
+    done: int = 0
+    progress: int = 0
+    overdue: int = 0
+    story_points: int = 0
+
+class WorkloadItem(BaseModel):
+    assignee: Optional[str] = None
+    open: int = 0
+    overdue: int = 0
+    story_points: int = 0
+
+class ProjectDashboard(BaseModel):
+    project: ProjectOut
+    total: int = 0
+    done: int = 0
+    progress: int = 0
+    overdue_count: int = 0
+    story_points_total: int = 0
+    story_points_done: int = 0
+    my_open: int = 0
+    columns: List[ColumnCount] = []
+    epics: List[EpicProgress] = []
+    no_epic: EpicProgress
+    by_priority: Dict[str, int] = {}
+    overdue: List[TicketBrief] = []
+    workload: Optional[List[WorkloadItem]] = None
+
+class WorkGroup(BaseModel):
+    project_id: int
+    project_name: str
+    project_color: str
+    tickets: List[TicketBrief] = []
+
+class MyWork(BaseModel):
+    groups: List[WorkGroup] = []
+    total_open: int = 0
+    overdue: int = 0

@@ -1,7 +1,7 @@
 from typing import Optional, List
 from enum import Enum
 from sqlmodel import Field, SQLModel
-from sqlalchemy import Column as SAColumn, JSON
+from sqlalchemy import Column as SAColumn, JSON, UniqueConstraint
 from datetime import date, datetime, timezone
 
 class ProjectRole(str, Enum):
@@ -62,9 +62,12 @@ class Project(SQLModel, table=True):
     is_archived: bool = Field(default=False)
 
 class Epic(SQLModel, table=True):
+    __table_args__ = (UniqueConstraint("project_id", "name", name="uq_epic_project_name"),)
     id: Optional[int] = Field(default=None, primary_key=True)
+    project_id: Optional[int] = Field(default=None, foreign_key="project.id", index=True)
     name: str
-    color: str
+    color: str = "#6366f1"
+    description: Optional[str] = None
 
 class Ticket(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)

@@ -31,13 +31,14 @@ def create_seed_data():
         # 3. Proyectos
         core_engine = Project(name="Core Engine", color="#ff5630")
         ui_redesign = Project(name="Frontend Redesign", color="#36b37e")
-        core_epic = Epic(name="Core Engine", color="#ff5733")
         
-        session.add_all([todo, halted, in_progress, done, core_epic, core_engine, ui_redesign])
+        session.add_all([todo, halted, in_progress, done, core_engine, ui_redesign])
         session.commit()
         
         session.refresh(core_engine)
         session.refresh(ui_redesign)
+
+        session.add(Epic(project_id=core_engine.id, name="Core Engine", color="#ff5733"))
 
         # 4. Asignar propiedad de los proyectos iniciales al usuario
         m1 = ProjectMember(project_id=core_engine.id, user_id=admin_user.id, role=ProjectRole.OWNER)

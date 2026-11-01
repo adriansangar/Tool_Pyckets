@@ -10,7 +10,7 @@ from database import get_session
 from auth import (
     get_current_user_from_token, check_project_permission,
 )
-from permissions import READ_ROLES, WRITE_ROLES, get_ticket_or_404, authorize_ticket
+from permissions import authorize_ticket_edit, READ_ROLES, get_ticket_or_404, authorize_ticket
 from schemas import (
     RepositoryCreate, RepositoryResponse, GitHubActivityResponse, ManualCommitLinkCreate,
 )
@@ -124,7 +124,7 @@ def manual_link_commit(
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket no encontrado")
         
-    authorize_ticket(ticket, current_user, session, WRITE_ROLES)
+    authorize_ticket_edit(ticket, current_user, session)
     existing = session.exec(
         select(CommitLink).where(CommitLink.ticket_id == ticket_id, CommitLink.commit_sha == commit_in.commit_sha)
     ).first()

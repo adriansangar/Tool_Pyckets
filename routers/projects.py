@@ -11,13 +11,12 @@ from database import get_session
 from auth import (
     get_current_user_from_token, check_project_permission,
 )
-from schemas import (
-    ProjectCreate,
-)
+from schemas import ProjectCreate, ProjectOut
+from permissions import require_superuser, project_role
 
 router = APIRouter()
 
-@router.get("/api/projects", response_model=List[Project])
+@router.get("/api/projects", response_model=List[ProjectOut])
 def get_projects(
     include_archived: bool = False, 
     current_user: User = Depends(get_current_user_from_token),
@@ -30,8 +29,12 @@ def get_projects(
         
     projects = session.exec(query).all()
     if not include_archived:
-        return [p for p in projects if not p.is_archived]
-    return projects
+        projects = [p for p in projects if not p.is_archived]
+    result = []
+    for p in projects:
+        role = project_role(p.id, current_user, session)
+        result.append(ProjectOut(**p.model_dump(), my_role=role.value if role else None))
+    return result
 
 
 @router.post("/api/projects", response_model=Project)
@@ -40,6 +43,7 @@ def create_project(
     current_user: User = Depends(get_current_user_from_token),
     session: Session = Depends(get_session)
 ):
+    require_superuser(current_user)
     db_project = Project(name=project.name, color=project.color, is_archived=False)
     session.add(db_project)
     session.commit()
@@ -58,7 +62,7 @@ def archive_project(
     current_user: User = Depends(get_current_user_from_token),
     session: Session = Depends(get_session)
 ):
-    check_project_permission(project_id, current_user, session, [ProjectRole.OWNER, ProjectRole.ADMIN])
+    require_superuser(current_user)
     db_project = session.get(Project, project_id)
     if not db_project:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
@@ -75,7 +79,7 @@ def unarchive_project(
     current_user: User = Depends(get_current_user_from_token),
     session: Session = Depends(get_session)
 ):
-    check_project_permission(project_id, current_user, session, [ProjectRole.OWNER, ProjectRole.ADMIN])
+    require_superuser(current_user)
     db_project = session.get(Project, project_id)
     if not db_project:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
@@ -92,7 +96,7 @@ def delete_project(
     current_user: User = Depends(get_current_user_from_token),
     session: Session = Depends(get_session)
 ):
-    check_project_permission(project_id, current_user, session, [ProjectRole.OWNER])
+    require_superuser(current_user)
     db_project = session.get(Project, project_id)
     if not db_project:
         raise HTTPException(status_code=404, detail="Proyecto no encontrado")
@@ -139,7 +143,7 @@ def add_or_update_project_member(
     current_user: User = Depends(get_current_user_from_token),
     session: Session = Depends(get_session)
 ):
-    check_project_permission(project_id, current_user, session, [ProjectRole.OWNER, ProjectRole.ADMIN])
+    require_superuser(current_user)
     target_user = session.get(User, user_id)
     if not target_user:
         raise HTTPException(status_code=404, detail="Usuario no encontrado")
@@ -171,7 +175,7 @@ def remove_project_member(
     current_user: User = Depends(get_current_user_from_token),
     session: Session = Depends(get_session)
 ):
-    check_project_permission(project_id, current_user, session, [ProjectRole.OWNER, ProjectRole.ADMIN])
+    require_superuser(current_user)
     member = session.exec(
         select(ProjectMember).where(ProjectMember.project_id == project_id, ProjectMember.user_id == user_id)
     ).first()

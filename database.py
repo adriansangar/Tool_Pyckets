@@ -1,6 +1,8 @@
 import os
 from sqlmodel import SQLModel, create_engine, Session
-from sqlalchemy import text
+from sqlalchemy import text, inspect
+from alembic import command
+from alembic.config import Config
 
 db_path = os.getenv("PYCKETS_DB_PATH", "pyckets.db")
 sqlite_url = f"sqlite:///{db_path}"
@@ -29,6 +31,7 @@ def migrate_db():
             ("ticket", "updated_at", "DATETIME"),
             ("repository", "auto_move_tickets", "BOOLEAN DEFAULT 1"),
             ("repository", "webhook_secret", "VARCHAR"),
+            ("ticket", "time_logged", "INTEGER DEFAULT 0"),
         ]
         
         for table, column, col_type in new_columns:
@@ -50,6 +53,22 @@ def migrate_db():
         except Exception as e:
             print(f"⚠️ Error normalizando enums: {e}")
 
+def _alembic_config() -> Config:
+    cfg = Config()
+    cfg.set_main_option("script_location", os.path.join(os.path.dirname(os.path.abspath(__file__)), "migrations"))
+    return cfg
+
 def create_db_and_tables():
-    SQLModel.metadata.create_all(engine)
-    migrate_db()
+    """Deja la base de datos en la última versión del esquema (Alembic).
+
+    - BD nueva: Alembic crea todo desde la migración baseline.
+    - BD anterior a Alembic: se completa con el mecanismo antiguo (tablas y columnas
+      que faltaran), se marca como baseline (0001) y se aplican las migraciones nuevas.
+    """
+    cfg = _alembic_config()
+    tables = set(inspect(engine).get_table_names())
+    if "alembic_version" not in tables and "ticket" in tables:
+        SQLModel.metadata.create_all(engine)   # tablas que faltaran en BD antiguas
+        migrate_db()                           # columnas que faltaran
+        command.stamp(cfg, "0001")
+    command.upgrade(cfg, "head")
