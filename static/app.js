@@ -14,6 +14,7 @@ let isListView = false;
 let globalColumns = [];
 let rawTickets = [];
 let currentProjectId = null;
+let projectRoles = {};   // id de proyecto -> rol del usuario (owner/admin/member/viewer)
 let currentUser = null;
 let selectedTicketIds = new Set();
 let activeSuggestionIndex = -1;
@@ -219,7 +220,9 @@ async function loadProjects() {
         if(!projectList) return;
         
         projectList.innerHTML = "";
+        projectRoles = {};
         projects.forEach(p => {
+            projectRoles[p.id] = p.my_role;
             const a = document.createElement("a");
             a.className = "nav-item project-link";
             a.href = "#";
@@ -527,6 +530,8 @@ if (sidePanel) {
     if (headerNewTicketBtn) {
         headerNewTicketBtn.addEventListener("click", () => {
             panelTitle.textContent = "Nuevo ticket";
+            loadEpicOptions(currentProjectId, "");
+            applyTicketFormRole(currentProjectId);
             sidePanel.classList.add("open");
         });
     }
@@ -575,6 +580,9 @@ if (sidePanel) {
                 if (response.ok) {
                     await fetchAndRenderTickets();
                     closePanel();
+                } else {
+                    const err = await response.json().catch(() => ({}));
+                    toast(err.detail || "No se pudo guardar el ticket", "error");
                 }
             } catch (error) {
                 console.error("Error guardando ticket:", error);
@@ -600,8 +608,9 @@ async function openEditPanel(ticketId) {
             document.getElementById("ticket-desc").value = ticket.description || "";
             setSelectValue("ticket-type", ticket.ticket_type, "TASK");
             setSelectValue("ticket-priority", ticket.priority, "MEDIUM");
-            document.getElementById("ticket-epic").value = ticket.epic || "";
+            await loadEpicOptions(ticket.project_id, ticket.epic);
             document.getElementById("ticket-assignee").value = ticket.assignee || "";
+            applyTicketFormRole(ticket.project_id);
             document.getElementById("ticket-due").value = String(ticket.due_date || "").slice(0, 10);
             document.getElementById("ticket-story-points").value = ticket.story_points || 0;
             document.getElementById("ticket-tags").value = ticket.tags ? ticket.tags.join(", ") : "";
@@ -1074,11 +1083,13 @@ const addMemberForm = document.getElementById("add-member-form");
 function checkAdminUI() {
     const navBtn = document.getElementById("nav-manage-users");
     if (!navBtn) return;
-    if (currentUser && (currentUser.is_superuser || currentUser.username === "adrian")) {
-        navBtn.style.display = "flex";
-    } else {
-        navBtn.style.display = "none";
-    }
+    const isSu = !!(currentUser && (currentUser.is_superuser || currentUser.username === "adrian"));
+    navBtn.style.display = isSu ? "flex" : "none";
+    // Crear/archivar proyectos y gestionar accesos es cosa del admin general
+    ["btn-open-create-project", "btn-project-members", "btn-archive-project"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = isSu ? "" : "none";
+    });
 }
 
 if (navManageUsers) {
@@ -1549,3 +1560,28 @@ document.getElementById("menu-profile").addEventListener("click", () => btnOpenP
 
 const btnGoBoard = document.getElementById("btn-go-board");
 if (btnGoBoard) btnGoBoard.addEventListener("click", () => setTab("board"));
+
+
+// ===== Roles por proyecto y épicas =====
+const isProjectAdmin = (pid) => ["owner", "admin"].includes(projectRoles[pid]);
+
+// Épicas, asignación y proyecto solo los cambia un admin del proyecto
+function applyTicketFormRole(pid) {
+    const admin = isProjectAdmin(pid);
+    ["ticket-epic", "ticket-assignee"].forEach(id => { document.getElementById(id).disabled = !admin; });
+}
+
+async function loadEpicOptions(projectId, selected) {
+    const sel = document.getElementById("ticket-epic");
+    sel.innerHTML = '<option value="">Sin épica</option>';
+    if (projectId) {
+        try {
+            const res = await authFetch(`${API_BASE}/projects/${projectId}/epics`);
+            if (res.ok) (await res.json()).forEach(e => sel.insertAdjacentHTML("beforeend", `<option value="${esc(e.name)}">${esc(e.name)}</option>`));
+        } catch (err) { console.error("Error cargando épicas:", err); }
+    }
+    if (selected && ![...sel.options].some(o => o.value === selected)) {
+        sel.insertAdjacentHTML("beforeend", `<option value="${esc(selected)}">${esc(selected)}</option>`);
+    }
+    sel.value = selected || "";
+}

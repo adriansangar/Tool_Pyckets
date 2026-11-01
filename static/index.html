@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Pyckets</title>
-    <link rel="stylesheet" href="/static/styles.css?v=v11.1">
+    <link rel="stylesheet" href="/static/styles.css?v=v12.0">
 </head>
 <body>
 
@@ -224,7 +224,7 @@
             <div style="display: flex; gap: 0.5rem;">
                 <div class="form-group" style="flex: 1;">
                     <label>Epic</label>
-                    <input type="text" id="ticket-epic" placeholder="Ej: Core Engine">
+                    <select id="ticket-epic"><option value="">Sin épica</option></select>
                 </div>
                 <div class="form-group" style="flex: 1;">
                     <label>Asignado</label>
@@ -487,11 +487,11 @@
             <form id="login-form">
                 <div class="form-group">
                     <label>Usuario</label>
-                    <input type="text" id="login-username" required value="adrian">
+                    <input type="text" id="login-username" required>
                 </div>
                 <div class="form-group">
                     <label>Contraseña</label>
-                    <input type="password" id="login-password" required value="admin123">
+                    <input type="password" id="login-password" required>
                 </div>
                 <div id="login-error" style="color: #ef4444; font-size: 0.85rem; margin-bottom: 1rem; display: none;"></div>
                 <button type="submit" class="btn primary full-width">Iniciar Sesión</button>
@@ -499,6 +499,6 @@
         </div>
     </div>
 
-    <script src="/static/app.js?v=v11.1"></script>
+    <script src="/static/app.js?v=v12.0"></script>
 </body>
 </html>
