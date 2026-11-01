@@ -1,3 +1,10 @@
-fastapi>=0.103.0
-uvicorn>=0.23.0
-sqlmodel>=0.0.8
+fastapi
+uvicorn
+sqlmodel
+bcrypt
+python-jose
+httpx
+python-multipart
+alembic
+# desarrollo
+pytest
