@@ -103,3 +103,12 @@ def test_legacy_epics_endpoint_only_shows_accessible(ca, cb, world):
     ca.post(f"/api/projects/{world['PA']}/epics", json={"name": "VisibleParaA"})
     assert "VisibleParaA" in [e["name"] for e in ca.get("/api/epics").json()]
     assert "VisibleParaA" not in [e["name"] for e in cb.get("/api/epics").json()]
+
+
+def test_member_can_create_ticket_inside_an_epic_but_not_move_it(ca, cm, world):
+    PA = world["PA"]
+    assert ca.post(f"/api/projects/{PA}/epics", json={"name": "TableroDeM"}).status_code == 200
+    r = cm.post("/api/tickets", json={"title": "x", "project_id": PA, "epic": "TableroDeM"})
+    assert r.status_code == 200 and r.json()["epic"] == "TableroDeM"
+    assert cm.put(f"/api/tickets/{r.json()['id']}", json={"epic": ""}).status_code == 403
+    assert cm.post("/api/tickets", json={"title": "x", "project_id": PA, "epic": "NoExiste"}).status_code == 400

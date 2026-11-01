@@ -56,8 +56,6 @@ def create_ticket(
     if not admin:
         if ticket.assignee and ticket.assignee != current_user.username:
             raise HTTPException(status_code=403, detail="Solo un admin del proyecto puede asignar tickets a otras personas")
-        if (ticket.epic or "").strip():
-            raise HTTPException(status_code=403, detail="Solo un admin del proyecto puede asignar épicas")
     ticket.epic = validate_epic(session, ticket.project_id, ticket.epic)
     if isinstance(ticket.due_date, str):
         ticket.due_date = datetime.strptime(ticket.due_date, "%Y-%m-%d").date() if ticket.due_date.strip() else None

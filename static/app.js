@@ -14,7 +14,14 @@ let isListView = false;
 let globalColumns = [];
 let rawTickets = [];
 let currentProjectId = null;
-let projectRoles = {};   // id de proyecto -> rol del usuario (owner/admin/member/viewer)
+let projectRoles = {};
+let projectsById = {};   // id -> proyecto (con my_role)
+let currentView = "home"; // home | mywork | project
+let currentTab = "home";  // home | board | list (dentro de un proyecto)
+let homeReady = false;
+let currentEpic = null;          // null = nivel proyecto; nombre de épica; o NO_EPIC
+const NO_EPIC = "__none__";
+let epicsCache = {};              // proyecto -> [{id, name, color, open}]   // id de proyecto -> rol del usuario (owner/admin/member/viewer)
 let currentUser = null;
 let selectedTicketIds = new Set();
 let activeSuggestionIndex = -1;
@@ -72,7 +79,7 @@ async function initBoard() {
     if (!isAuthenticated) return;
 
     await loadProjects();
-    await fetchAndRenderTickets();
+    await navigate("home");
 }
 
 async function checkAuth() {
@@ -150,6 +157,7 @@ if (btnLogout) {
 }
 
 async function fetchAndRenderTickets() {
+    if (!currentProjectId) return;   // el tablero y la lista solo existen dentro de un proyecto
     try {
         const ticketUrl = currentProjectId ? `${API_BASE}/tickets?project_id=${currentProjectId}` : `${API_BASE}/tickets`;
         const [columnsRes, ticketsRes] = await Promise.all([
@@ -161,7 +169,9 @@ async function fetchAndRenderTickets() {
 
         globalColumns = await columnsRes.json();
         fillStatusOptions();
-        rawTickets = await ticketsRes.json();
+        const all = await ticketsRes.json();
+        rawTickets = currentEpic === null ? all
+            : all.filter(t => currentEpic === NO_EPIC ? !(t.epic || "").trim() : t.epic === currentEpic);
 
         applyOmnibarFilter();
         renderQuickFilters(rawTickets);
@@ -172,13 +182,14 @@ async function fetchAndRenderTickets() {
 }
 
 function parseOmnibar(q) {
-    const f = { text: [], assignee: [], priority: [], status: [], label: [], type: [] };
-    String(q || "").trim().split(/\s+/).filter(Boolean).forEach(tok => {
-        const m = tok.match(/^(assignee|priority|status|label|type):(.+)$/i);
-        if (m) f[m[1].toLowerCase()].push(norm(m[2]));
-        else if (tok[0] === "@" && tok.length > 1) f.assignee.push(norm(tok.slice(1)));
-        else if (tok[0] === "#" && tok.length > 1) f.label.push(norm(tok.slice(1)));
-        else f.text.push(norm(tok));
+    const f = { text: [], assignee: [], priority: [], status: [], label: [], type: [], epic: [] };
+    const clean = (s) => norm(s.replace(/"/g, ""));
+    (String(q || "").match(/(?:[^\s"]+|"[^"]*")+/g) || []).forEach(tok => {
+        const m = tok.match(/^(assignee|priority|status|label|type|epic):(.+)$/i);
+        if (m) f[m[1].toLowerCase()].push(clean(m[2]));
+        else if (tok[0] === "@" && tok.length > 1) f.assignee.push(clean(tok.slice(1)));
+        else if (tok[0] === "#" && tok.length > 1) f.label.push(clean(tok.slice(1)));
+        else f.text.push(clean(tok));
     });
     return f;
 }
@@ -192,6 +203,7 @@ function filterTicketsByOmnibar(tickets, queryStr) {
             && f.priority.every(p => norm(t.priority) === p)
             && f.status.every(s => norm(t.status) === s.replace(/\s+/g, "_"))
             && f.type.every(s => norm(t.ticket_type) === s)
+            && f.epic.every(s => norm(t.epic) === s)
             && f.label.every(l => tags.some(tg => tg.includes(l)))
             && f.text.every(w => hay.includes(w));
     });
@@ -221,42 +233,23 @@ async function loadProjects() {
         
         projectList.innerHTML = "";
         projectRoles = {};
+        projectsById = {};
         projects.forEach(p => {
             projectRoles[p.id] = p.my_role;
+            projectsById[p.id] = p;
             const a = document.createElement("a");
             a.className = "nav-item project-link";
+            a.dataset.id = p.id;
+            a.title = p.name;
             a.href = "#";
             a.innerHTML = `<span class="project-color" style="background-color: ${esc(p.color)};"></span> <span class="text">${esc(p.name)}</span>`;
             
-            a.addEventListener("click", async (e) => {
-                e.preventDefault();
-                document.querySelectorAll(".nav-item").forEach(el => el.classList.remove("active"));
-                a.classList.add("active");
-                
-                currentProjectId = p.id;
-                document.getElementById("board-title").textContent = p.name;
-                if (headerNewTicketBtn) headerNewTicketBtn.style.display = "inline-flex"; setProjectChrome(true); 
-                
-                boardContainer.style.display = "none";
-                if (listContainer) listContainer.style.display = "none";
-                document.getElementById("quick-filters").style.display = "none";
-                
-                const home = document.getElementById("project-home");
-                if (home) {
-                    home.style.display = "block";
-                    document.getElementById("home-project-name").textContent = `Resumen: ${p.name}`;
-                    
-                    const tRes = await authFetch(`${API_BASE}/tickets?project_id=${currentProjectId}`);
-                    if (tRes.ok) {
-                        const tickets = await tRes.json();
-                        renderProjectDashboard(tickets);
-                    }
-                    await loadProjectGithubFeed();
-                }
-            });
-            
+            a.addEventListener("click", (e) => { e.preventDefault(); navigate("project", { project: p }); });
             projectList.appendChild(a);
         });
+        if (currentProjectId) renderSidebarEpics(currentProjectId, true);
+        syncSidebarActive();
+        if (currentView === "home" && homeReady) loadHome();
     } catch (e) {
         console.error("Error cargando proyectos:", e);
     }
@@ -264,30 +257,19 @@ async function loadProjects() {
 
 if (btnToggleView) {
     btnToggleView.addEventListener("click", () => {
-        isListView = !isListView;
-        const home = document.getElementById("project-home");
-        if (home && home.style.display !== "none") return;
-
-        if (isListView) {
-            boardContainer.style.display = "none";
-            if (listContainer) listContainer.style.display = "block";
-            btnToggleView.textContent = "Vista Kanban";
-        } else {
-            boardContainer.style.display = "flex";
-            if (listContainer) listContainer.style.display = "none";
-            btnToggleView.textContent = "Vista Lista";
-        }
+        if (currentView === "project" && currentTab !== "home") setTab(currentTab === "board" ? "list" : "board");
     });
 }
 
 function renderColumns(columns) {
     if (!boardContainer) return;
     boardContainer.innerHTML = "";
-    columns.forEach(col => {
+    columns.forEach((col, idx) => {
         const statusId = statusIdOf(col.name);
         const colDiv = document.createElement("div");
         colDiv.className = "kanban-column";
         colDiv.dataset.status = statusId;
+        colDiv.style.setProperty("--i", idx);
         colDiv.innerHTML = `
             <div class="column-header">
                 <span class="col-title"><span class="status-dot"></span>${esc(titleCase(col.name))}</span>
@@ -319,7 +301,7 @@ function renderTickets(tickets) {
             <div class="tags-container">${(ticket.tags || []).map(t => `<span class="tag-badge">#${esc(t)}</span>`).join("")}</div>
             <div class="ticket-meta">
                 <div class="meta-left">
-                    <span class="priority-badge priority-${esc(prio)}">${PRIO_LABEL[prio] || esc(titleCase(prio))}</span>
+                    ${prioIcon(prio)}
                     <span class="type-badge">${TYPE_LABEL[type] || esc(titleCase(type))}</span>
                     ${dueChip(ticket)}
                     ${ticket.story_points ? `<span class="points-chip" title="Story points">${ticket.story_points}</span>` : ""}
@@ -345,9 +327,9 @@ function renderTableTickets(tickets, clearTable = false) {
         tr.innerHTML = `
             <td><input type="checkbox" class="ticket-select-check" data-id="${ticket.id}" ${selectedTicketIds.has(ticket.id) ? "checked" : ""}></td>
             <td class="ticket-key">TB-${ticket.id}</td>
-            <td><span class="priority-badge priority-${esc(prio)}">${PRIO_LABEL[prio] || esc(titleCase(prio))}</span> <span class="type-badge">${TYPE_LABEL[type] || esc(titleCase(type))}</span></td>
+            <td>${prioIcon(prio, true)} <span class="type-badge">${TYPE_LABEL[type] || esc(titleCase(type))}</span></td>
             <td class="ticket-link">${esc(ticket.title)}</td>
-            <td><span class="status-pill status-${esc(st)}">${esc(statusLabel(st))}</span></td>
+            <td><span class="si-label">${statusIcon(st)}<span>${esc(statusLabel(st))}</span></span></td>
             <td>${ticket.assignee ? esc(ticket.assignee) : '<span class="empty-note">Sin asignar</span>'}</td>
             <td>${dueChip(ticket) || '<span class="empty-note">—</span>'}</td>
             <td class="num">${ticket.story_points || 0}</td>`;
@@ -530,7 +512,7 @@ if (sidePanel) {
     if (headerNewTicketBtn) {
         headerNewTicketBtn.addEventListener("click", () => {
             panelTitle.textContent = "Nuevo ticket";
-            loadEpicOptions(currentProjectId, "");
+            loadEpicOptions(currentProjectId, currentEpic && currentEpic !== NO_EPIC ? currentEpic : "");
             applyTicketFormRole(currentProjectId);
             sidePanel.classList.add("open");
         });
@@ -578,7 +560,7 @@ if (sidePanel) {
                 });
 
                 if (response.ok) {
-                    await fetchAndRenderTickets();
+                    await refreshCurrentView();
                     closePanel();
                 } else {
                     const err = await response.json().catch(() => ({}));
@@ -1237,9 +1219,9 @@ function updateProfileUI(user) {
     const handle = document.getElementById("user-handle-text");
     if (badge) badge.textContent = user.avatar || "🚀";
     if (handle) handle.textContent = `@${user.username}`;
-    const sa = document.getElementById("side-avatar"), su = document.getElementById("side-user");
-    if (sa) sa.textContent = user.avatar || "🚀";
-    if (su) su.textContent = user.first_name ? `${user.first_name} ${user.last_name || ""}`.trim() : `@${user.username}`;
+    const mn = document.getElementById("menu-name"), me = document.getElementById("menu-email");
+    if (mn) mn.textContent = user.first_name ? `${user.first_name} ${user.last_name || ""}`.trim() : `@${user.username}`;
+    if (me) me.textContent = user.email || "";
 
     checkAdminUI();
 
@@ -1328,40 +1310,40 @@ const commandPaletteInput = document.getElementById("command-palette-input");
 const commandPaletteList = document.getElementById("command-palette-list");
 const btnTriggerPalette = document.getElementById("btn-trigger-command-palette");
 
-const commandActions = [
-    { title: "⚡ Crear Nuevo Ticket", action: () => { if (headerNewTicketBtn) headerNewTicketBtn.click(); } },
-    { title: "📊 Cambiar a Vista Lista / Kanban", action: () => { if (btnToggleView) btnToggleView.click(); } },
-    { title: "🌙 Cambiar Tema Claro/Oscuro", action: () => { document.getElementById("theme-toggle").click(); } },
-    { title: "👤 Ver Mis Tickets Asignados", action: () => { navGlobalMine.click(); } },
-    { title: "🏠 Ver Todos los Tickets", action: () => { navGlobalAll.click(); } }
-];
+let paletteItems = [];
+let paletteTickets = null;
 
 function openCommandPalette() {
     if (!commandPaletteModal) return;
     commandPaletteModal.style.display = "flex";
     commandPaletteInput.value = "";
-    renderCommandActions(commandActions);
-    setTimeout(() => commandPaletteInput.focus(), 100);
+    renderCommandActions(buildCommands(""));
+    paletteTickets = null;
+    authFetch(`${API_BASE}/tickets`).then(r => r.ok ? r.json() : []).then(list => {
+        paletteTickets = list;
+        if (commandPaletteModal.style.display !== "none" && commandPaletteInput.value.trim().length >= 2) renderCommandActions(buildCommands(commandPaletteInput.value));
+    }).catch(() => {});
+    setTimeout(() => commandPaletteInput.focus(), 60);
 }
 
 function closeCommandPalette() {
     if (commandPaletteModal) commandPaletteModal.style.display = "none";
 }
 
-function renderCommandActions(actions) {
+function renderCommandActions(items) {
     if (!commandPaletteList) return;
-    commandPaletteList.innerHTML = actions.map((act, i) => `
-        <div class="command-item ${i === 0 ? 'selected' : ''}" data-index="${i}">
-            <span>${act.title}</span>
-            <kbd style="font-size:0.7rem; background:var(--bg-app); padding:2px 6px; border-radius:4px;">Enter</kbd>
-        </div>
-    `).join("");
-
-    commandPaletteList.querySelectorAll(".command-item").forEach((item, idx) => {
-        item.addEventListener("click", () => {
-            actions[idx].action();
-            closeCommandPalette();
-        });
+    paletteItems = items;
+    if (!items.length) { commandPaletteList.innerHTML = '<div class="command-empty">Sin resultados</div>'; return; }
+    let last = null, html = "";
+    items.forEach((it, i) => {
+        if (it.group !== last) { html += `<div class="command-group">${esc(it.group)}</div>`; last = it.group; }
+        html += `<div class="command-item ${i === 0 ? "selected" : ""}" data-index="${i}">
+            <span class="ci-icon">${svg(PALETTE_ICONS[it.icon] || "")}</span><span class="ci-title">${esc(it.title)}</span>
+            ${it.hint ? `<span class="ci-hint">${esc(it.hint)}</span>` : ""}<kbd>Enter</kbd></div>`;
+    });
+    commandPaletteList.innerHTML = html;
+    commandPaletteList.querySelectorAll(".command-item").forEach(el => {
+        el.addEventListener("click", () => { const it = paletteItems[+el.dataset.index]; closeCommandPalette(); if (it) it.action(); });
     });
 }
 
@@ -1383,55 +1365,10 @@ document.addEventListener("keydown", (e) => {
 });
 
 if (commandPaletteInput) {
-    commandPaletteInput.addEventListener("input", (e) => {
-        const query = e.target.value.toLowerCase();
-        const filtered = commandActions.filter(a => a.title.toLowerCase().includes(query));
-        renderCommandActions(filtered);
-    });
+    commandPaletteInput.addEventListener("input", (e) => renderCommandActions(buildCommands(e.target.value)));
 }
 
-// NAVEGACION Y PROYECTOS
-if (navGlobalAll) {
-    navGlobalAll.addEventListener("click", (e) => {
-        e.preventDefault();
-        document.querySelectorAll(".nav-item").forEach(el => el.classList.remove("active"));
-        navGlobalAll.classList.add("active");
-        
-        currentProjectId = null;
-        document.getElementById("board-title").textContent = "Todos los tickets";
-        if (headerNewTicketBtn) headerNewTicketBtn.style.display = "none"; setProjectChrome(false);
-        
-        document.getElementById("project-home").style.display = "none";
-        document.getElementById("quick-filters").style.display = "flex";
-        
-        if (isListView) {
-            document.getElementById("list-container").style.display = "block";
-            boardContainer.style.display = "none";
-        } else {
-            boardContainer.style.display = "flex";
-            document.getElementById("list-container").style.display = "none";
-        }
-        fetchAndRenderTickets();
-    });
-}
-
-if (navGlobalMine) {
-    navGlobalMine.addEventListener("click", (e) => {
-        e.preventDefault();
-        document.querySelectorAll(".nav-item").forEach(el => el.classList.remove("active"));
-        navGlobalMine.classList.add("active");
-        
-        currentProjectId = null;
-        document.getElementById("board-title").textContent = "Mis tickets";
-        if (headerNewTicketBtn) headerNewTicketBtn.style.display = "none"; setProjectChrome(false);
-        
-        document.getElementById("project-home").style.display = "none";
-        document.getElementById("quick-filters").style.display = "flex";
-        
-        if (searchInput) searchInput.value = "@" + (currentUser ? currentUser.username : "adrian");
-        fetchAndRenderTickets();
-    });
-}
+// NAVEGACION: ver el módulo "v13" al final del archivo
 
 const toggleSidebarBtn = document.getElementById('toggle-sidebar');
 const sidebar = document.getElementById('sidebar');
@@ -1481,38 +1418,6 @@ if (commandPaletteInput) {
 
 
 // ===== v11: contexto de proyecto, dashboard, ticket rápido/completo, horas, cuenta =====
-function setProjectChrome(on) {
-    const tabs = document.getElementById("project-tabs");
-    if (tabs) tabs.style.display = on ? "flex" : "none";
-    if (btnToggleView) btnToggleView.style.display = on ? "none" : "";
-    if (on) setTab("home", false);
-}
-function setTab(tab, load = true) {
-    document.querySelectorAll("#project-tabs .tab").forEach(t => t.classList.toggle("active", t.dataset.tab === tab));
-    const home = document.getElementById("project-home"), qf = document.getElementById("quick-filters");
-    home.style.display = tab === "home" ? "block" : "none";
-    qf.style.display = tab === "home" ? "none" : "flex";
-    boardContainer.style.display = tab === "board" ? "flex" : "none";
-    listContainer.style.display = tab === "list" ? "block" : "none";
-    if (load && tab !== "home") fetchAndRenderTickets();
-}
-document.querySelectorAll("#project-tabs .tab").forEach(t => t.addEventListener("click", () => setTab(t.dataset.tab)));
-
-function renderProjectDashboard(tickets) {
-    const total = tickets.length, today = new Date().toLocaleDateString("sv-SE");
-    const by = (s) => tickets.filter(t => norm(t.status) === s).length;
-    const done = by("done"), late = tickets.filter(t => t.due_date && String(t.due_date).slice(0, 10) < today && norm(t.status) !== "done").length;
-    const pts = tickets.reduce((a, t) => a + (t.story_points || 0), 0), pct = total ? Math.round(done / total * 100) : 0;
-    const card = (n, l, x = "") => `<div class="stat-card"><div class="stat-num">${n}</div><div class="stat-label">${l}</div>${x}</div>`;
-    document.getElementById("home-stats").innerHTML =
-        card(total, "Tickets") + card(by("in_progress"), "En progreso") + card(late, "Vencidos") + card(pts, "Story points") +
-        card(pct + "%", "Completado", `<div class="progress"><i style="width:${pct}%"></i></div>`);
-    document.getElementById("home-breakdown").innerHTML = globalColumns.map(c => {
-        const id = statusIdOf(c.name), n = by(id);
-        return `<div class="bd-row" data-status="${id}"><span>${esc(titleCase(c.name))}</span><div class="bd-bar"><i style="width:${total ? n / total * 100 : 0}%"></i></div><span>${n}</span></div>`;
-    }).join("") || '<p class="empty-note">Sin columnas configuradas.</p>';
-}
-
 function fillStatusOptions(sel) {
     const el = document.getElementById("ticket-status");
     if (!el || !globalColumns.length) return;
@@ -1552,14 +1457,19 @@ document.getElementById("btn-log-time").addEventListener("click", () => {
     renderWorklogs(editingTicket.id);
 });
 
-// Menú de cuenta
+// Menú de usuario (arriba a la derecha)
 const accMenu = document.getElementById("account-menu");
-document.getElementById("btn-account").addEventListener("click", (e) => { e.stopPropagation(); accMenu.style.display = accMenu.style.display === "none" ? "block" : "none"; });
-document.addEventListener("click", () => { accMenu.style.display = "none"; });
-document.getElementById("menu-profile").addEventListener("click", () => btnOpenProfile.click());
-
-const btnGoBoard = document.getElementById("btn-go-board");
-if (btnGoBoard) btnGoBoard.addEventListener("click", () => setTab("board"));
+const userMenuBtn = document.getElementById("btn-user-menu");
+function toggleUserMenu(open) {
+    const show = open === undefined ? accMenu.style.display === "none" : open;
+    accMenu.style.display = show ? "block" : "none";
+    userMenuBtn.setAttribute("aria-expanded", String(show));
+}
+userMenuBtn.addEventListener("click", (e) => { e.stopPropagation(); toggleUserMenu(); });
+document.addEventListener("click", (e) => { if (!e.target.closest("#account-menu")) toggleUserMenu(false); });
+accMenu.addEventListener("click", (e) => { if (e.target.closest(".nav-item")) toggleUserMenu(false); });
+document.getElementById("menu-theme").addEventListener("click", () => document.getElementById("theme-toggle").click());
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") toggleUserMenu(false); });
 
 
 // ===== Roles por proyecto y épicas =====
@@ -1585,3 +1495,607 @@ async function loadEpicOptions(projectId, selected) {
     }
     sel.value = selected || "";
 }
+
+
+// =====================================================================
+// v13 · Navegación unificada, Inicio, Mi trabajo y Resumen de proyecto
+// =====================================================================
+const ROLE_LABEL = { owner: "Propietario", admin: "Admin", member: "Miembro", viewer: "Lectura" };
+const roleLabel = (role) => (currentUser && currentUser.is_superuser) ? "Admin general" : (ROLE_LABEL[role] || role || "");
+
+function svg(inner) {
+    return `<svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${inner}</svg>`;
+}
+
+function prioIcon(p, withLabel = false) {
+    p = norm(p) || "medium";
+    const label = PRIO_LABEL[p] || titleCase(p);
+    let inner;
+    if (p === "urgent") {
+        inner = '<rect x="2.5" y="2.5" width="11" height="11" rx="3.2" fill="currentColor" stroke="none"/><path d="M8 5.3v3.5" stroke="#fff" stroke-width="1.7"/><circle cx="8" cy="10.9" r="0.95" fill="#fff" stroke="none"/>';
+    } else {
+        const n = { high: 3, medium: 2, low: 1 }[p] || 2;
+        inner = [0, 1, 2].map(i => { const h = 4 + i * 3; return `<rect x="${2.5 + i * 4.2}" y="${13 - h}" width="2.6" height="${h}" rx="0.9" fill="currentColor" stroke="none" opacity="${i < n ? 1 : 0.28}"/>`; }).join("");
+    }
+    return `<span class="prio-chip prio-${esc(p)}" title="Prioridad: ${esc(label)}">${svg(inner)}${withLabel ? `<span class="prio-label">${esc(label)}</span>` : ""}</span>`;
+}
+
+function statusIcon(s) {
+    s = norm(s) || "todo";
+    const last = globalColumns.length ? statusIdOf(globalColumns[globalColumns.length - 1].name) : "done";
+    const kind = s === last || s === "done" ? "done" : (["halted", "in_progress"].includes(s) ? s : "todo");
+    const inner = {
+        todo: '<circle cx="8" cy="8" r="5.5" stroke-dasharray="2.2 2.2"/>',
+        halted: '<circle cx="8" cy="8" r="5.5"/><path d="M6.6 6v4M9.4 6v4" stroke-width="1.6"/>',
+        in_progress: '<circle cx="8" cy="8" r="5.5"/><path d="M8 4.6a3.4 3.4 0 0 1 0 6.8z" fill="currentColor" stroke="none"/>',
+        done: '<circle cx="8" cy="8" r="6" fill="currentColor" stroke="none"/><path d="m5.6 8.2 1.7 1.7 3.2-3.4" stroke="#fff" stroke-width="1.7"/>'
+    }[kind];
+    return `<span class="si si-${kind}" title="${esc(statusLabel(s))}">${svg(inner)}</span>`;
+}
+
+const dueLabel = (t) => {
+    if (!t.due_date) return "<span></span>";
+    const label = new Date(String(t.due_date).slice(0, 10) + "T00:00:00").toLocaleDateString("es-ES", { day: "numeric", month: "short" });
+    return `<span class="due ${t.overdue ? "overdue" : ""}" title="Fecha límite">${label}</span>`;
+};
+
+function ticketRow(t, i = 0) {
+    return `<div class="trow" style="--i:${i}" data-id="${t.id}" role="button" tabindex="0">
+        ${statusIcon(t.status)}${prioIcon(t.priority)}<span class="key">TB-${t.id}</span>
+        <span class="t">${esc(t.title)}</span>
+        ${t.epic ? `<span class="epic-chip">${esc(t.epic)}</span>` : "<span></span>"}
+        ${dueLabel(t)}
+    </div>`;
+}
+
+function openRowOnClick(containerId) {
+    const el = document.getElementById(containerId);
+    const open = (e) => { const r = e.target.closest(".trow"); if (r) openEditPanel(r.dataset.id); };
+    el.addEventListener("click", open);
+    el.addEventListener("keydown", (e) => { if (e.key === "Enter") open(e); });
+}
+
+// ---------- navegación por niveles: Inicio / Mi trabajo · Proyecto (resumen por épicas) · Épica (resumen, tablero, lista) ----------
+const VIEW_ELS = ["view-home", "view-mywork", "project-home", "epic-home", "board-container", "list-container"];
+
+function playItems(el) {
+    if (!el) return;
+    el.classList.remove("enter-items");
+    void el.offsetWidth;
+    el.classList.add("enter-items");
+    clearTimeout(el._itemsT);
+    el._itemsT = setTimeout(() => el.classList.remove("enter-items"), 1200);
+}
+
+function showOnly(id) {
+    VIEW_ELS.forEach(v => {
+        const el = document.getElementById(v);
+        if (!el) return;
+        const visible = v === id;
+        el.style.display = visible ? (v === "board-container" ? "flex" : "block") : "none";
+        el.classList.remove("enter-view");
+        if (visible) {
+            void el.offsetWidth;
+            el.classList.add("enter-view");
+            clearTimeout(el._viewT);
+            el._viewT = setTimeout(() => el.classList.remove("enter-view"), 700);
+        }
+    });
+}
+
+function syncSidebarActive() {
+    document.querySelectorAll(".sidebar .nav-item").forEach(n => n.classList.remove("active", "parent-active"));
+    if (currentView === "home") { navGlobalAll.classList.add("active"); return; }
+    if (currentView === "mywork") { navGlobalMine.classList.add("active"); return; }
+    const link = document.querySelector(`.project-link[data-id="${currentProjectId}"]`);
+    if (!link) return;
+    if (currentView === "project") { link.classList.add("active"); return; }
+    link.classList.add("parent-active");
+    const epicLink = [...document.querySelectorAll(".nav-epic")].find(a => a.dataset.epic === currentEpic);
+    if (epicLink) epicLink.classList.add("active");
+}
+
+function positionTabIndicator() {
+    const tabs = document.getElementById("project-tabs"), ind = tabs && tabs.querySelector(".tab-indicator"), active = tabs && tabs.querySelector(".tab.active");
+    if (!ind || !active) return;
+    ind.style.width = active.offsetWidth + "px";
+    ind.style.transform = `translateX(${active.offsetLeft}px)`;
+}
+window.addEventListener("resize", positionTabIndicator);
+
+function setHeader({ html, tabs = false, search = false, newTicket = false }) {
+    document.getElementById("board-title").innerHTML = html;
+    document.getElementById("project-tabs").style.display = tabs ? "flex" : "none";
+    if (tabs) positionTabIndicator();
+    const sc = document.querySelector(".top-header .search-container");
+    if (sc) sc.style.display = search ? "" : "none";
+    document.getElementById("quick-filters").style.display = search ? "flex" : "none";
+    if (headerNewTicketBtn) headerNewTicketBtn.style.display = newTicket ? "inline-flex" : "none";
+    if (btnToggleView) btnToggleView.style.display = "none";
+}
+
+const projectCrumb = (p) => `<span class="crumb-current"><span class="crumb-dot" style="background:${esc(p.color)}"></span>${esc(p.name)}</span>`;
+function epicCrumbs(p) {
+    const none = currentEpic === NO_EPIC;
+    const known = (epicsCache[p.id] || []).find(e => e.name === currentEpic);
+    const color = none ? "var(--text-faint)" : (known ? known.color : "var(--primary)");
+    return `<a class="crumb" data-go="project" href="#"><span class="crumb-dot" style="background:${esc(p.color)}"></span>${esc(p.name)}</a>
+        <span class="crumb-sep">›</span>
+        <span class="crumb-current"><span class="crumb-dot" style="background:${esc(color)}"></span>${esc(none ? "Sin épica" : currentEpic)}</span>`;
+}
+document.getElementById("board-title").addEventListener("click", (e) => {
+    if (e.target.closest("[data-go]")) { e.preventDefault(); navigate("project", { projectId: currentProjectId }); }
+});
+
+async function navigate(view, opts = {}) {
+    let p = null;
+    if (view === "project" || view === "epic") {
+        p = opts.project || projectsById[opts.projectId];
+        if (!p) return navigate("home");
+        currentProjectId = p.id;
+    } else {
+        currentProjectId = null;
+    }
+    currentView = view;
+    if (view === "home") {
+        currentEpic = null;
+        syncSidebarActive();
+        document.querySelectorAll(".nav-children").forEach(el => el.remove());
+        setHeader({ html: "Inicio" });
+        showOnly("view-home");
+        await loadHome();
+    } else if (view === "mywork") {
+        currentEpic = null;
+        syncSidebarActive();
+        document.querySelectorAll(".nav-children").forEach(el => el.remove());
+        setHeader({ html: "Mi trabajo" });
+        showOnly("view-mywork");
+        await loadMyWork();
+    } else if (view === "project") {
+        currentEpic = null;
+        syncSidebarActive();
+        setHeader({ html: projectCrumb(p), newTicket: p.my_role !== "viewer" });
+        showOnly("project-home");
+        renderSidebarEpics(p.id);
+        await loadProjectSummary();
+    } else if (view === "epic") {
+        currentEpic = opts.epic;
+        if (searchInput) searchInput.value = opts.search || "";
+        syncSidebarActive();
+        renderSidebarEpics(p.id, true);
+        await setTab(opts.tab || "summary");
+    }
+}
+
+async function setTab(tab, load = true) {
+    currentTab = tab;
+    const p = projectsById[currentProjectId];
+    if (!p || currentView !== "epic") return;
+    setHeader({ html: epicCrumbs(p), tabs: true, search: tab !== "summary", newTicket: p.my_role !== "viewer" });
+    document.querySelectorAll("#project-tabs .tab").forEach(t => t.classList.toggle("active", t.dataset.tab === tab));
+    positionTabIndicator();
+    isListView = tab === "list";
+    showOnly(tab === "summary" ? "epic-home" : tab === "board" ? "board-container" : "list-container");
+    if (!load) return;
+    await fetchAndRenderTickets();
+    if (tab === "summary") renderEpicSummary();
+    if (tab === "board") playItems(document.getElementById("board-container"));
+}
+
+async function refreshCurrentView() {
+    if (currentView === "home") return loadHome();
+    if (currentView === "mywork") return loadMyWork();
+    if (currentView === "project") return loadProjectSummary();
+    if (currentView === "epic") { await fetchAndRenderTickets(); if (currentTab === "summary") renderEpicSummary(); }
+}
+document.querySelectorAll("#project-tabs .tab").forEach(t => t.addEventListener("click", () => setTab(t.dataset.tab)));
+
+// ---------- sidebar: épicas del proyecto abierto ----------
+async function loadProjectEpics(pid, force = false) {
+    if (!force && epicsCache[pid]) return epicsCache[pid];
+    try {
+        const res = await authFetch(`${API_BASE}/projects/${pid}/epics`);
+        if (res.ok) epicsCache[pid] = (await res.json()).map(e => ({ id: e.id, name: e.name, color: e.color, open: e.tickets_total - e.tickets_done }));
+    } catch (err) { console.error("Error cargando épicas:", err); }
+    return epicsCache[pid] || [];
+}
+async function renderSidebarEpics(pid, useCache = false) {
+    const epics = await loadProjectEpics(pid, !useCache);
+    if (currentProjectId !== pid) return;
+    document.querySelectorAll(".nav-children").forEach(el => el.remove());
+    const link = document.querySelector(`.project-link[data-id="${pid}"]`);
+    if (!link) return;
+    const box = document.createElement("div");
+    box.className = "nav-children";
+    const item = (name, color, count, i, label) => `<a href="#" class="nav-item nav-epic" style="--i:${i}" data-epic="${esc(name)}" title="${esc(label)}">
+        <span class="dot" style="background:${esc(color)}"></span><span class="text">${esc(label)}</span><span class="nav-count">${count}</span></a>`;
+    box.innerHTML = epics.map((e, i) => item(e.name, e.color, e.open, i, e.name)).join("") + item(NO_EPIC, "var(--text-faint)", "", epics.length, "Sin épica");
+    link.after(box);
+    playItems(box);
+    syncSidebarActive();
+}
+document.getElementById("project-list").addEventListener("click", (e) => {
+    const a = e.target.closest(".nav-epic");
+    if (!a) return;
+    e.preventDefault();
+    navigate("epic", { projectId: currentProjectId, epic: a.dataset.epic });
+});
+async function afterEpicChange() {
+    const pid = currentProjectId;
+    await loadProjectEpics(pid, true);
+    if (currentView === "project") await loadProjectSummary(); else renderSidebarEpics(pid, true);
+}
+
+// ---------- paleta de comandos (Ctrl+K) ----------
+const PALETTE_ICONS = {
+    home: '<path d="M2.5 7.2 8 2.8l5.5 4.4V13a.5.5 0 0 1-.5.5H3a.5.5 0 0 1-.5-.5z"/>',
+    work: '<path d="m3 4.5 1.2 1.2L6.5 3.5M3 10.5l1.2 1.2 2.3-2.2M9 5h4M9 11h4"/>',
+    folder: '<path d="M2.5 4.5a1 1 0 0 1 1-1h3l1.5 1.5h4.5a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z"/>',
+    layers: '<path d="m8 2.5 5.5 3L8 8.5l-5.5-3z"/><path d="m2.5 8.5 5.5 3 5.5-3"/>',
+    plus: '<path d="M8 3v10M3 8h10"/>',
+    board: '<rect x="2.5" y="3" width="3.2" height="10" rx="1"/><rect x="6.4" y="3" width="3.2" height="6.5" rx="1"/><rect x="10.3" y="3" width="3.2" height="8" rx="1"/>',
+    list: '<path d="M5.5 4h8M5.5 8h8M5.5 12h8"/><circle cx="2.8" cy="4" r=".6"/><circle cx="2.8" cy="8" r=".6"/><circle cx="2.8" cy="12" r=".6"/>',
+    summary: '<path d="M3 13V8M8 13V3M13 13V6"/>',
+    user: '<circle cx="8" cy="5.5" r="2.5"/><path d="M3 13c0-2.5 2.2-4 5-4s5 1.5 5 4"/>',
+    users: '<circle cx="6" cy="5.5" r="2.3"/><path d="M1.8 13c0-2.2 1.9-3.6 4.2-3.6s4.2 1.4 4.2 3.6"/><path d="M10.5 3.5a2.3 2.3 0 0 1 0 4.4M12 9.6c1.4.4 2.2 1.5 2.2 3.4"/>',
+    archive: '<rect x="2.5" y="3" width="11" height="2.8" rx=".8"/><path d="M3.5 5.8V13h9V5.8M6.5 8.5h3"/>',
+    moon: '<path d="M13 9.5A5.5 5.5 0 1 1 6.5 3a4.3 4.3 0 0 0 6.5 6.5z"/>',
+    sidebar: '<rect x="2.5" y="3" width="11" height="10" rx="1.5"/><path d="M6 3v10"/>',
+    logout: '<path d="M6.5 3H3.5v10h3M10 5.5 12.5 8 10 10.5M12.5 8H6.5"/>',
+    ticket: '<path d="M3 5.5a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1V7a1.2 1.2 0 0 0 0 2v1.5a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1.2 1.2 0 0 0 0-2z"/>',
+    back: '<path d="M9.5 4 5.5 8l4 4"/>'
+};
+
+function buildCommands(query) {
+    const q = norm(query).trim();
+    const items = [];
+    const add = (group, title, icon, action, hint = "", kw = "") => items.push({ group, title, icon, action, hint, kw: norm(`${title} ${group} ${kw}`) });
+    const proj = (currentView === "project" || currentView === "epic") ? projectsById[currentProjectId] : null;
+    const canCreate = proj && proj.my_role !== "viewer";
+    const admin = proj && isProjectAdmin(proj.id);
+    const su = !!(currentUser && currentUser.is_superuser);
+
+    if (currentView === "epic" && proj) {
+        add("En esta épica", "Resumen", "summary", () => setTab("summary"), "", "vista");
+        add("En esta épica", "Tablero", "board", () => setTab("board"), "", "vista kanban");
+        add("En esta épica", "Lista", "list", () => setTab("list"), "", "vista tabla");
+        add("En esta épica", `Volver a ${proj.name}`, "back", () => navigate("project", { projectId: proj.id }), "", "proyecto atras");
+    }
+    if (canCreate) add("Crear", "Nuevo ticket", "ticket", () => headerNewTicketBtn.click(), currentEpic && currentEpic !== NO_EPIC ? `en ${currentEpic}` : `en ${proj.name}`, "tarea crear");
+    if (admin) add("Crear", "Nueva épica", "layers", () => openEpicModal(), `en ${proj.name}`, "crear epica tablero");
+    if (su) add("Crear", "Nuevo proyecto", "folder", () => openProjectModal(), "", "crear");
+    if (proj && su) add("Proyecto actual", "Gestionar miembros", "users", () => document.getElementById("btn-project-members").click(), proj.name, "accesos permisos");
+
+    add("Ir a", "Inicio", "home", () => navigate("home"), "", "dashboard proyectos");
+    add("Ir a", "Mi trabajo", "work", () => navigate("mywork"), "", "mis tickets asignados");
+    Object.values(projectsById).forEach(p => add("Proyectos", p.name, "folder", () => navigate("project", { project: p }), p.id === currentProjectId ? "actual" : "", "proyecto"));
+    if (proj) {
+        (epicsCache[proj.id] || []).forEach(e => add("Épicas", e.name, "layers", () => navigate("epic", { projectId: proj.id, epic: e.name }), proj.name, "epica tablero"));
+        add("Épicas", "Sin épica", "layers", () => navigate("epic", { projectId: proj.id, epic: NO_EPIC }), proj.name, "epica tablero");
+    }
+    add("Cuenta", "Mi perfil", "user", () => btnOpenProfile.click(), "", "avatar contraseña");
+    if (su) add("Cuenta", "Gestión de usuarios", "users", () => document.getElementById("nav-manage-users").click(), "", "admin");
+    add("Cuenta", "Proyectos archivados", "archive", () => navArchivedProjects.click());
+    add("Preferencias", "Cambiar tema claro / oscuro", "moon", () => document.getElementById("theme-toggle").click(), "", "apariencia");
+    add("Preferencias", "Plegar o desplegar la barra lateral", "sidebar", () => toggleSidebarBtn.click());
+    add("Cuenta", "Cerrar sesión", "logout", () => document.getElementById("btn-logout").click(), "", "salir");
+
+    if (!q) return items;
+    const words = q.split(/\s+/);
+    const found = items.filter(it => words.every(w => it.kw.includes(w)));
+    if (q.length >= 2 && paletteTickets) {
+        paletteTickets
+            .filter(t => words.every(w => norm(`tb-${t.id} ${t.title} ${t.assignee || ""}`).includes(w)))
+            .slice(0, 6)
+            .forEach(t => {
+                const pr = projectsById[t.project_id];
+                found.push({ group: "Tickets", title: t.title, icon: "ticket", hint: `TB-${t.id}${pr ? " · " + pr.name : ""}`, action: () => openEditPanel(t.id) });
+            });
+    }
+    return found;
+}
+
+if (navGlobalAll) navGlobalAll.addEventListener("click", (e) => { e.preventDefault(); navigate("home"); });
+if (navGlobalMine) navGlobalMine.addEventListener("click", (e) => { e.preventDefault(); navigate("mywork"); });
+const btnHomeNewProject = document.getElementById("btn-home-new-project");
+if (btnHomeNewProject) btnHomeNewProject.addEventListener("click", () => document.getElementById("btn-open-create-project").click());
+
+
+// ---------- Inicio ----------
+const kpi = (value, label, { warn = false, extra = "" } = {}) =>
+    `<div class="kpi ${warn ? "warn" : ""}"><div class="v">${value}</div><div class="l">${label}</div>${extra}</div>`;
+
+function statusSegments(byStatus) {
+    const order = globalColumns.map(c => statusIdOf(c.name));
+    Object.keys(byStatus).forEach(s => { if (!order.includes(s)) order.push(s); });
+    return order.filter(s => byStatus[s]).map(s => `<i class="seg st-${esc(s)}" style="flex:${byStatus[s]}" title="${esc(statusLabel(s))}: ${byStatus[s]}"></i>`).join("");
+}
+
+async function loadHome() {
+    const [cRes, wRes, colRes] = await Promise.all([
+        authFetch(`${API_BASE}/dashboard`), authFetch(`${API_BASE}/me/work`), authFetch(`${API_BASE}/columns`)
+    ]);
+    if (!cRes.ok) return;
+    const cards = await cRes.json();
+    const work = wRes.ok ? await wRes.json() : { total_open: 0, overdue: 0 };
+    if (colRes.ok) { globalColumns = await colRes.json(); fillStatusOptions(); }
+
+    const d = new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" });
+    document.getElementById("home-subtitle").textContent = d.charAt(0).toUpperCase() + d.slice(1);
+    const isSu = !!(currentUser && currentUser.is_superuser);
+    if (btnHomeNewProject) btnHomeNewProject.style.display = isSu ? "" : "none";
+
+    document.getElementById("home-summary").innerHTML =
+        kpi(cards.length, "Proyectos activos") +
+        kpi(work.total_open, "Mis tickets abiertos") +
+        kpi(work.overdue, "Mis tickets vencidos", { warn: work.overdue > 0 }) +
+        kpi(cards.reduce((a, c) => a + c.overdue, 0), "Vencidos en los proyectos", { warn: cards.some(c => c.overdue > 0) });
+
+    const grid = document.getElementById("home-projects");
+    if (!cards.length) {
+        grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1"><b>${isSu ? "Aún no hay proyectos" : "Todavía no tienes proyectos asignados"}</b>${isSu ? "Crea el primero con «Nuevo proyecto»." : "Un administrador te dará acceso."}</div>`;
+    } else {
+        grid.innerHTML = cards.map((c, i) => `
+            <div class="project-card" style="--i:${i}" data-id="${c.id}" role="button" tabindex="0">
+                <div class="pc-head"><span class="swatch" style="background:${esc(c.color)}"></span><h3>${esc(c.name)}</h3><span class="chip">${esc(roleLabel(c.my_role))}</span></div>
+                <div class="pc-progress"><div class="pc-pct">${c.progress}<small>%</small></div><div class="pc-sub">${c.done} de ${c.total} completados</div></div>
+                <div class="statusbar">${statusSegments(c.by_status)}</div>
+                <dl class="pc-stats">
+                    <div><dt>Abiertos</dt><dd>${c.total - c.done}</dd></div>
+                    <div><dt>Vencidos</dt><dd class="${c.overdue ? "warn" : ""}">${c.overdue}</dd></div>
+                    <div><dt>Míos</dt><dd>${c.my_open}</dd></div>
+                    <div><dt>Épicas</dt><dd>${c.epics}</dd></div>
+                </dl>
+            </div>`).join("");
+    }
+    playItems(document.getElementById("home-summary"));
+    playItems(grid);
+    homeReady = true;
+}
+(function () {
+    const grid = document.getElementById("home-projects");
+    const go = (e) => { const c = e.target.closest(".project-card"); if (c) navigate("project", { projectId: +c.dataset.id }); };
+    grid.addEventListener("click", go);
+    grid.addEventListener("keydown", (e) => { if (e.key === "Enter") go(e); });
+})();
+
+// ---------- Mi trabajo ----------
+async function loadMyWork() {
+    const res = await authFetch(`${API_BASE}/me/work`);
+    if (!res.ok) return;
+    const w = await res.json();
+    document.getElementById("mywork-subtitle").textContent = `${w.total_open} abiertos · ${w.overdue} vencidos`;
+    const body = document.getElementById("mywork-body");
+    if (!w.groups.length) {
+        body.innerHTML = '<div class="section-card"><div class="empty-state"><b>No tienes tickets abiertos</b>Lo que te asignen aparecerá aquí, con los vencidos primero.</div></div>';
+        return;
+    }
+    body.innerHTML = w.groups.map(g => `
+        <div class="section-card" style="margin-bottom: 14px;">
+            <div class="group-head"><span class="swatch" style="background:${esc(g.project_color)}"></span>${esc(g.project_name)}<span class="count">${g.tickets.length}</span></div>
+            ${g.tickets.map((t, i) => ticketRow(t, i)).join("")}
+        </div>`).join("");
+    playItems(body);
+}
+openRowOnClick("mywork-body");
+
+// ---------- Resumen de proyecto ----------
+let projectEpics = {};
+async function loadProjectSummary() {
+    const id = currentProjectId;
+    const res = await authFetch(`${API_BASE}/projects/${id}/dashboard`);
+    if (!res.ok) { toast("No se pudo cargar el resumen del proyecto", "error"); return; }
+    const d = await res.json();
+    if (id !== currentProjectId) return;   // el usuario cambió de proyecto mientras cargaba
+    const admin = isProjectAdmin(id);
+
+    document.getElementById("home-project-name").textContent = d.project.name;
+    document.getElementById("home-project-meta").textContent =
+        `${roleLabel(d.project.my_role)} · ${d.total} tickets · ${d.story_points_done} de ${d.story_points_total} puntos`;
+    ["btn-project-repos", "btn-sync-github"].forEach(b => { document.getElementById(b).style.display = admin ? "" : "none"; });
+    document.getElementById("btn-new-epic").style.display = admin ? "" : "none";
+
+    document.getElementById("home-stats").innerHTML =
+        kpi(`${d.progress}<small>%</small>`, "Completado", { extra: `<div class="bar ok"><i style="width:${d.progress}%"></i></div>` }) +
+        kpi(d.total - d.done, "Abiertos") +
+        kpi(d.overdue_count, "Vencidos", { warn: d.overdue_count > 0 }) +
+        kpi(`${d.story_points_done}<small> / ${d.story_points_total}</small>`, "Puntos") +
+        kpi(d.my_open, "Asignados a mí");
+
+    const totalCols = d.columns.reduce((a, c) => a + c.count, 0);
+    document.getElementById("home-breakdown").innerHTML =
+        `<div class="statusbar" style="height:8px">${d.columns.filter(c => c.count).map(c => `<i class="seg st-${esc(c.status)}" style="flex:${c.count}"></i>`).join("")}</div>
+         <div class="legend">${d.columns.map(c => `<span><i class="dot" style="background:var(--st-${esc(c.status)}, var(--st-todo))"></i>${esc(titleCase(c.name))} · ${c.count}</span>`).join("")}
+         ${totalCols ? "" : '<span class="muted">Sin tickets todavía</span>'}</div>`;
+
+    projectEpics = {};
+    const epicRow = (e, editable, i = 0) => {
+        if (e.id) projectEpics[e.id] = e;
+        return `<div class="epic-row" style="--i:${i}" ${e.id ? `data-id="${e.id}"` : 'data-none="1"'}>
+            <span class="swatch" style="background:${esc(e.color)}"></span>
+            <div style="min-width:0"><div class="name">${esc(e.name)}</div>${e.description ? `<div class="desc">${esc(e.description)}</div>` : ""}</div>
+            <div class="bar ok" title="${e.progress}%"><i style="width:${e.progress}%"></i></div>
+            <span class="num">${e.done}/${e.total}</span>
+            <span class="num ${e.overdue ? "badge-warn" : ""}">${e.overdue ? e.overdue + " venc." : ""}</span>
+            ${editable ? '<button class="icon-btn edit" data-edit title="Editar épica"><svg class="ic" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 13h2.5L13 5.5 10.5 3 3 10.5V13z"/></svg></button>' : "<span></span>"}
+        </div>`;
+    };
+    const epicsEl = document.getElementById("home-epics");
+    epicsEl.innerHTML = (d.epics.length || d.no_epic.total)
+        ? d.epics.map((e, i) => epicRow(e, admin, i)).join("") + (d.no_epic.total ? epicRow(d.no_epic, false, d.epics.length) : "")
+        : `<div class="empty-state"><b>Aún no hay épicas</b>${admin ? "Crea la primera para organizar el trabajo del proyecto." : "Un admin del proyecto las irá creando."}</div>`;
+
+    playItems(epicsEl);
+    playItems(document.getElementById("home-stats"));
+    epicsCache[id] = d.epics.map(e => ({ id: e.id, name: e.name, color: e.color, open: e.total - e.done }));
+    renderSidebarEpics(id, true);
+
+    document.getElementById("home-overdue").innerHTML = d.overdue.length
+        ? d.overdue.map((t, i) => ticketRow(t, i)).join("")
+        : '<div class="empty-state">Nada vencido</div>';
+
+    const wlSection = document.getElementById("home-workload-section");
+    if (d.workload === null) {
+        wlSection.style.display = "none";
+    } else {
+        wlSection.style.display = "";
+        const max = Math.max(1, ...d.workload.map(w => w.open));
+        document.getElementById("home-workload").innerHTML = d.workload.length
+            ? d.workload.map(w => `<div class="wl-row">
+                <span class="assignee-avatar">${w.assignee ? esc(w.assignee.charAt(0).toUpperCase()) : "–"}</span>
+                <span>${w.assignee ? "@" + esc(w.assignee) : '<span class="muted">Sin asignar</span>'}</span>
+                <div class="bar"><i style="width:${Math.round(100 * w.open / max)}%"></i></div>
+                <span class="num">${w.open}</span><span class="num ${w.overdue ? "badge-warn" : ""}">${w.overdue ? w.overdue + " v." : ""}</span></div>`).join("")
+            : '<div class="empty-state">Sin tickets abiertos</div>';
+    }
+    await loadProjectGithubFeed();
+}
+openRowOnClick("home-overdue");
+document.getElementById("home-epics").addEventListener("click", (e) => {
+    const row = e.target.closest(".epic-row");
+    if (!row) return;
+    if (row.dataset.none) { navigate("epic", { projectId: currentProjectId, epic: NO_EPIC }); return; }
+    const epic = projectEpics[row.dataset.id];
+    if (!epic) return;
+    if (e.target.closest("[data-edit]")) { openEpicModal(epic); return; }
+    navigate("epic", { projectId: currentProjectId, epic: epic.name });
+});
+
+// ---------- Gestor de épicas ----------
+const EPIC_COLORS = ["#6872e5", "#3b82f6", "#06b6d4", "#10b981", "#f59e0b", "#ef4444", "#a855f7", "#64748b"];
+let epicColor = EPIC_COLORS[0];
+function renderSwatches() {
+    document.getElementById("epic-swatches").innerHTML = EPIC_COLORS.map(c =>
+        `<button type="button" class="swatch-btn ${c === epicColor ? "selected" : ""}" data-color="${c}" style="background:${c}" aria-label="Color ${c}"></button>`).join("");
+}
+function openEpicModal(epic = null) {
+    document.getElementById("epic-modal-title").textContent = epic ? "Editar épica" : "Nueva épica";
+    document.getElementById("epic-id").value = epic ? epic.id : "";
+    document.getElementById("epic-name").value = epic ? epic.name : "";
+    document.getElementById("epic-desc").value = epic && epic.description ? epic.description : "";
+    epicColor = epic ? epic.color : EPIC_COLORS[0];
+    document.getElementById("epic-delete").style.display = epic ? "" : "none";
+    renderSwatches();
+    document.getElementById("epic-modal").style.display = "flex";
+    document.getElementById("epic-name").focus();
+}
+function closeEpicModal() { document.getElementById("epic-modal").style.display = "none"; }
+document.getElementById("btn-new-epic").addEventListener("click", () => openEpicModal());
+document.getElementById("epic-cancel").addEventListener("click", closeEpicModal);
+document.getElementById("epic-swatches").addEventListener("click", (e) => {
+    const b = e.target.closest(".swatch-btn");
+    if (b) { epicColor = b.dataset.color; renderSwatches(); }
+});
+document.getElementById("epic-modal").addEventListener("mousedown", (e) => { if (e.target.id === "epic-modal") closeEpicModal(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && document.getElementById("epic-modal").style.display !== "none") closeEpicModal(); });
+document.getElementById("epic-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const id = document.getElementById("epic-id").value;
+    const body = { name: document.getElementById("epic-name").value.trim(), color: epicColor, description: document.getElementById("epic-desc").value.trim() || null };
+    const url = `${API_BASE}/projects/${currentProjectId}/epics${id ? "/" + id : ""}`;
+    const res = await authFetch(url, { method: id ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (res.ok) { closeEpicModal(); toast(id ? "Épica actualizada" : "Épica creada"); await afterEpicChange(); }
+    else { const err = await res.json().catch(() => ({})); toast(err.detail || "No se pudo guardar la épica", "error"); }
+});
+document.getElementById("epic-delete").addEventListener("click", async () => {
+    const id = document.getElementById("epic-id").value;
+    const name = document.getElementById("epic-name").value;
+    if (!id || !confirm(`¿Eliminar la épica «${name}»? Sus tickets quedarán sin épica.`)) return;
+    const res = await authFetch(`${API_BASE}/projects/${currentProjectId}/epics/${id}`, { method: "DELETE" });
+    if (res.ok) { closeEpicModal(); toast("Épica eliminada"); await afterEpicChange(); }
+    else { const err = await res.json().catch(() => ({})); toast(err.detail || "No se pudo eliminar la épica", "error"); }
+});
+
+// ---------- Resumen de una épica (calculado con sus tickets) ----------
+function renderEpicSummary() {
+    const p = projectsById[currentProjectId];
+    if (!p) return;
+    const none = currentEpic === NO_EPIC;
+    const done = globalColumns.length ? statusIdOf(globalColumns[globalColumns.length - 1].name) : "done";
+    const today = new Date().toLocaleDateString("sv-SE");
+    const isLate = (t) => t.status !== done && t.due_date && String(t.due_date).slice(0, 10) < today;
+    const tickets = rawTickets, total = tickets.length;
+    const nDone = tickets.filter(t => t.status === done).length;
+    const open = tickets.filter(t => t.status !== done), late = tickets.filter(isLate);
+    const pts = tickets.reduce((a, t) => a + (t.story_points || 0), 0);
+    const ptsDone = tickets.filter(t => t.status === done).reduce((a, t) => a + (t.story_points || 0), 0);
+    const pct = total ? Math.round(100 * nDone / total) : 0;
+    const mine = open.filter(t => currentUser && t.assignee === currentUser.username).length;
+
+    document.getElementById("epic-title").textContent = none ? "Sin épica" : currentEpic;
+    document.getElementById("epic-meta").textContent = `${p.name} · ${total} tickets · ${ptsDone} de ${pts} puntos`;
+    document.getElementById("epic-kpis").innerHTML =
+        kpi(`${pct}<small>%</small>`, "Completado", { extra: `<div class="bar ok"><i style="width:${pct}%"></i></div>` }) +
+        kpi(open.length, "Abiertos") + kpi(late.length, "Vencidos", { warn: late.length > 0 }) +
+        kpi(`${ptsDone}<small> / ${pts}</small>`, "Puntos") + kpi(mine, "Asignados a mí");
+
+    const counts = globalColumns.map(c => ({ id: statusIdOf(c.name), name: c.name, n: tickets.filter(t => t.status === statusIdOf(c.name)).length }));
+    document.getElementById("epic-breakdown").innerHTML =
+        `<div class="statusbar" style="height:8px">${counts.filter(c => c.n).map(c => `<i class="seg st-${esc(c.id)}" style="flex:${c.n}"></i>`).join("")}</div>
+         <div class="legend">${counts.map(c => `<span><i class="dot" style="background:var(--st-${esc(c.id)}, var(--st-todo))"></i>${esc(titleCase(c.name))} · ${c.n}</span>`).join("")}
+         ${total ? "" : '<span class="muted">Esta épica aún no tiene tickets</span>'}</div>`;
+
+    document.getElementById("epic-overdue").innerHTML = late.length
+        ? late.map((t, i) => ticketRow({ ...t, overdue: true }, i)).join("") : '<div class="empty-state">Nada vencido</div>';
+
+    const wl = document.getElementById("epic-workload-section");
+    if (!isProjectAdmin(currentProjectId)) { wl.style.display = "none"; }
+    else {
+        wl.style.display = "";
+        const by = {};
+        open.forEach(t => { const k = t.assignee || ""; (by[k] = by[k] || { open: 0, late: 0 }); by[k].open++; if (isLate(t)) by[k].late++; });
+        const rows = Object.entries(by).sort((a, b) => b[1].open - a[1].open);
+        const max = Math.max(1, ...rows.map(r => r[1].open));
+        document.getElementById("epic-workload").innerHTML = rows.length ? rows.map(([name, v], i) => `<div class="wl-row" style="--i:${i}">
+            <span class="assignee-avatar">${name ? esc(name.charAt(0).toUpperCase()) : "–"}</span>
+            <span>${name ? "@" + esc(name) : '<span class="muted">Sin asignar</span>'}</span>
+            <div class="bar"><i style="width:${Math.round(100 * v.open / max)}%"></i></div>
+            <span class="num">${v.open}</span><span class="num ${v.late ? "badge-warn" : ""}">${v.late ? v.late + " v." : ""}</span></div>`).join("")
+            : '<div class="empty-state">Sin tickets abiertos</div>';
+    }
+    playItems(document.getElementById("epic-kpis"));
+    playItems(document.getElementById("epic-workload"));
+}
+openRowOnClick("epic-overdue");
+
+// ---------- Crear proyecto (solo admin general) ----------
+let newProjectColor = EPIC_COLORS[0];
+function renderProjectSwatches() {
+    document.getElementById("project-swatches").innerHTML = EPIC_COLORS.map(c =>
+        `<button type="button" class="swatch-btn ${c === newProjectColor ? "selected" : ""}" data-color="${c}" style="background:${c}" aria-label="Color ${c}"></button>`).join("");
+}
+function openProjectModal() {
+    document.getElementById("new-project-name").value = "";
+    newProjectColor = EPIC_COLORS[0];
+    renderProjectSwatches();
+    document.getElementById("project-modal").style.display = "flex";
+    document.getElementById("new-project-name").focus();
+}
+function closeProjectModal() { document.getElementById("project-modal").style.display = "none"; }
+document.getElementById("btn-open-create-project").addEventListener("click", openProjectModal);
+document.getElementById("close-project-modal").addEventListener("click", closeProjectModal);
+document.getElementById("project-swatches").addEventListener("click", (e) => {
+    const b = e.target.closest(".swatch-btn");
+    if (b) { newProjectColor = b.dataset.color; renderProjectSwatches(); }
+});
+document.getElementById("project-modal").addEventListener("mousedown", (e) => { if (e.target.id === "project-modal") closeProjectModal(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeProjectModal(); });
+document.getElementById("project-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = document.getElementById("new-project-name").value.trim();
+    if (!name) return;
+    const res = await authFetch(`${API_BASE}/projects`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, color: newProjectColor }) });
+    if (res.ok) {
+        const created = await res.json();
+        closeProjectModal();
+        toast("Proyecto creado");
+        await loadProjects();
+        await navigate("project", { projectId: created.id });
+    } else {
+        const err = await res.json().catch(() => ({}));
+        toast(err.detail || "No se pudo crear el proyecto", "error");
+    }
+});
+
+// Arranque: si hay sesión guardada se restaura; si no, aparece el login
+initBoard();
